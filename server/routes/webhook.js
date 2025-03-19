@@ -22,17 +22,82 @@ router.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
+      console.error("Webhook signature verification failed:", err);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
+
+    console.log(`Received Stripe webhook event: ${event.type}`);
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
       const purchaseId = session.metadata.purchaseId;
+      const userId = session.metadata.userId;
+      const courseId = session.metadata.courseId;
 
-      // ✅ Update the purchase status in MongoDB
-      await Purchase.findByIdAndUpdate(purchaseId, { status: "completed" });
+      console.log(
+        `Processing completed checkout session for Purchase ID: ${purchaseId}`
+      );
+      console.log(`User ID: ${userId}, Course ID: ${courseId}`);
 
-      console.log(`Payment successful for Purchase ID: ${purchaseId}`);
+      try {
+        // Update the purchase status in MongoDB
+        await Purchase.findByIdAndUpdate(purchaseId, {
+          status: "completed",
+          completedAt: new Date(),
+        });
+
+        // Add the course to the user's enrolled courses
+        const userData = await User.findById(userId);
+        if (!userData) {
+          console.error(`User ${userId} not found`);
+          return res.status(400).json({
+            received: true,
+            error: "User not found",
+          });
+        }
+
+        // Add course to user's enrolled courses if not already enrolled
+        const courseAlreadyEnrolled = userData.enrolledCourses.some(
+          (id) => id.toString() === courseId.toString()
+        );
+
+        if (!courseAlreadyEnrolled) {
+          console.log(`Adding course ${courseId} to user's enrolled courses`);
+          userData.enrolledCourses.push(courseId);
+          await userData.save();
+        }
+
+        // Add user to course's enrolled students
+        const courseData = await Course.findById(courseId);
+        if (!courseData) {
+          console.error(`Course ${courseId} not found`);
+          return res.status(400).json({
+            received: true,
+            error: "Course not found",
+          });
+        }
+
+        // Add user to course's enrolled students if not already enrolled
+        const userAlreadyInCourse = courseData.enrolledStudents.some(
+          (id) => id.toString() === userId.toString()
+        );
+
+        if (!userAlreadyInCourse) {
+          console.log(`Adding user ${userId} to course's enrolled students`);
+          courseData.enrolledStudents.push(userId);
+          await courseData.save();
+        }
+
+        console.log(
+          `Successfully enrolled user ${userId} in course ${courseId}`
+        );
+      } catch (error) {
+        console.error(`Error processing webhook: ${error.message}`);
+        return res.status(500).json({
+          received: true,
+          error: error.message,
+        });
+      }
     }
 
     res.json({ received: true });

@@ -161,6 +161,20 @@ export const stripeWebhooks = async (request, response) => {
   try {
     //Handle the event
     switch (event.type) {
+      case "checkout.session.completed": {
+        // Handle the checkout session completed event
+        const session = event.data.object;
+        const { purchaseId, userId, courseId } = session.metadata;
+
+        console.log(
+          `Processing checkout.session.completed for Purchase ID: ${purchaseId}`
+        );
+        console.log(`User ID: ${userId}, Course ID: ${courseId}`);
+
+        await processSuccessfulPayment(purchaseId, userId, courseId);
+        break;
+      }
+
       case "payment_intent.succeeded": {
         const paymentIntent = event.data.object;
         const paymentIntentId = paymentIntent.id;
@@ -182,204 +196,15 @@ export const stripeWebhooks = async (request, response) => {
         }
 
         // Get metadata from the session
-        const { purchaseId, userId, courseId, courseTitle } =
-          session.data[0].metadata;
+        const { purchaseId, userId, courseId } = session.data[0].metadata;
         console.log(
-          `Found metadata: purchaseId=${purchaseId}, userId=${userId}, courseId=${courseId}, title=${courseTitle}`
+          `Found metadata: purchaseId=${purchaseId}, userId=${userId}, courseId=${courseId}`
         );
 
-        // First verify the purchase
-        const purchaseData = await Purchase.findById(purchaseId);
-        if (!purchaseData) {
-          console.log(
-            `Purchase not found in database: ${purchaseId}, creating fallback record`
-          );
-
-          // If we have userId and courseId in metadata, we can proceed anyway
-          if (!userId || !courseId) {
-            console.error("Missing required user or course ID in metadata");
-            return response.status(400).json({
-              received: true,
-              warning: "Purchase not found and no fallback IDs in metadata",
-            });
-          }
-
-          console.log(
-            "Using fallback user and course IDs from session metadata"
-          );
-        }
-
-        // Get the user - either from purchase or directly from metadata
-        const userIdToUse = purchaseData?.userId || userId;
-        console.log(`Looking up user with ID: ${userIdToUse}`);
-
-        const userData = await User.findById(userIdToUse);
-
-        if (!userData) {
-          console.error(`User not found in database: ${userIdToUse}`);
-          return response.status(400).json({
-            received: true,
-            warning: "User not found in database",
-          });
-        }
-        console.log(`Found user: ${userData.name} (${userData._id})`);
-
-        // Get the course - either from purchase or directly from metadata
-        const courseIdToUse = purchaseData?.courseId || courseId;
-        console.log(`Looking up course with ID: ${courseIdToUse}`);
-
-        const courseData = await Course.findById(courseIdToUse.toString());
-
-        if (!courseData) {
-          console.error(`Course not found in database: ${courseIdToUse}`);
-          return response.status(400).json({
-            received: true,
-            warning: "Course not found in database",
-          });
-        }
-        console.log(
-          `Found course: ${courseData.courseTitle} (${courseData._id})`
-        );
-
-        console.log(
-          `Enrolling user ${userData._id} in course ${courseData._id}`
-        );
-
-        try {
-          // Ensure the userData.enrolledCourses is an array
-          if (!Array.isArray(userData.enrolledCourses)) {
-            console.log(
-              "User enrolledCourses not an array, initializing as empty array"
-            );
-            userData.enrolledCourses = [];
-          }
-
-          // Ensure the courseData.enrolledStudents is an array
-          if (!Array.isArray(courseData.enrolledStudents)) {
-            console.log(
-              "Course enrolledStudents not an array, initializing as empty array"
-            );
-            courseData.enrolledStudents = [];
-          }
-
-          // Add user to course's enrolled students if not already enrolled
-          const userAlreadyInCourse = courseData.enrolledStudents.some(
-            (studentId) => studentId.toString() === userData._id.toString()
-          );
-
-          if (!userAlreadyInCourse) {
-            console.log(
-              `Adding user ${userData._id} to course's enrolled students array`
-            );
-            courseData.enrolledStudents.push(userData._id);
-            await courseData.save();
-            console.log(
-              `Successfully updated course ${courseData._id} enrolled students`
-            );
-          } else {
-            console.log(
-              `User ${userData._id} already in course's enrolled students array`
-            );
-          }
-
-          // Add course to user's enrolled courses if not already enrolled
-          const courseAlreadyEnrolled = userData.enrolledCourses.some(
-            (courseId) => courseId.toString() === courseData._id.toString()
-          );
-
-          if (!courseAlreadyEnrolled) {
-            console.log(
-              `Adding course ${courseData._id} to user's enrolled courses array`
-            );
-            userData.enrolledCourses.push(courseData._id);
-            await userData.save();
-            console.log(
-              `Successfully updated user ${userData._id} enrolled courses`
-            );
-          } else {
-            console.log(
-              `Course ${courseData._id} already in user's enrolled courses array`
-            );
-          }
-
-          // Update or create the purchase
-          if (purchaseData) {
-            console.log(
-              `Updating existing purchase: ${purchaseId} to completed status`
-            );
-            await Purchase.findByIdAndUpdate(purchaseId, {
-              status: "completed",
-              completedAt: new Date(),
-            });
-            console.log(`Payment completed for purchase: ${purchaseId}`);
-          } else if (userId && courseId) {
-            // Create a new purchase record as fallback
-            console.log(
-              `Creating new purchase record for user ${userId} and course ${courseId}`
-            );
-            const newPurchase = await Purchase.create({
-              userId,
-              courseId,
-              amount: courseData.coursePrice,
-              status: "completed",
-              completedAt: new Date(),
-            });
-            console.log(`Created new purchase record: ${newPurchase._id}`);
-          }
-
-          // Double-check that the enrollment was successful
-          console.log(`Verifying enrollment by querying user data again`);
-          const updatedUser = await User.findById(userData._id);
-
-          const isEnrolled = updatedUser.enrolledCourses.some(
-            (id) => id.toString() === courseData._id.toString()
-          );
-
-          if (!isEnrolled) {
-            console.error(
-              `Enrollment verification failed - course not found in user's enrolledCourses after save`
-            );
-            // Force add the course one more time with a different method
-            await User.findByIdAndUpdate(userData._id, {
-              $addToSet: { enrolledCourses: courseData._id },
-            });
-            console.log(`Forced enrollment using $addToSet operator`);
-
-            // Verify one more time
-            const finalCheck = await User.findById(userData._id);
-            const finalEnrolled = finalCheck.enrolledCourses.some(
-              (id) => id.toString() === courseData._id.toString()
-            );
-
-            if (!finalEnrolled) {
-              console.error(
-                `CRITICAL: Final enrollment verification still failed!`
-              );
-            } else {
-              console.log(
-                `Final verification successful - user is now enrolled`
-              );
-            }
-          } else {
-            console.log(
-              `Verification successful - user is properly enrolled in the course`
-            );
-          }
-
-          console.log(
-            `User ${userData._id} successfully enrolled in course ${courseData._id}`
-          );
-        } catch (error) {
-          console.error(`Error updating enrollment data:`, error);
-          // Still return success to Stripe, but log the error
-          return response.json({
-            received: true,
-            warning: `Error updating enrollment: ${error.message}`,
-          });
-        }
-
+        await processSuccessfulPayment(purchaseId, userId, courseId);
         break;
       }
+
       case "payment_intent.payment_failed": {
         const paymentIntent = event.data.object;
         const paymentIntentId = paymentIntent.id;
@@ -429,3 +254,182 @@ export const stripeWebhooks = async (request, response) => {
     });
   }
 };
+
+// Helper function to process successful payments
+async function processSuccessfulPayment(purchaseId, userId, courseId) {
+  // First verify the purchase
+  const purchaseData = await Purchase.findById(purchaseId);
+  if (!purchaseData) {
+    console.log(
+      `Purchase not found in database: ${purchaseId}, creating fallback record`
+    );
+
+    // If we have userId and courseId in metadata, we can proceed anyway
+    if (!userId || !courseId) {
+      console.error("Missing required user or course ID in metadata");
+      throw new Error("Purchase not found and no fallback IDs in metadata");
+    }
+
+    console.log("Using fallback user and course IDs from session metadata");
+  }
+
+  // Get the user - either from purchase or directly from metadata
+  const userIdToUse = purchaseData?.userId || userId;
+  console.log(`Looking up user with ID: ${userIdToUse}`);
+
+  const userData = await User.findById(userIdToUse);
+
+  if (!userData) {
+    console.error(`User not found in database: ${userIdToUse}`);
+    throw new Error("User not found in database");
+  }
+  console.log(`Found user: ${userData.name} (${userData._id})`);
+
+  // Get the course - either from purchase or directly from metadata
+  const courseIdToUse = purchaseData?.courseId || courseId;
+  console.log(`Looking up course with ID: ${courseIdToUse}`);
+
+  const courseData = await Course.findById(courseIdToUse.toString());
+
+  if (!courseData) {
+    console.error(`Course not found in database: ${courseIdToUse}`);
+    throw new Error("Course not found in database");
+  }
+  console.log(`Found course: ${courseData.courseTitle} (${courseData._id})`);
+
+  console.log(`Enrolling user ${userData._id} in course ${courseData._id}`);
+
+  try {
+    // Ensure the userData.enrolledCourses is an array
+    if (!Array.isArray(userData.enrolledCourses)) {
+      console.log(
+        "User enrolledCourses not an array, initializing as empty array"
+      );
+      userData.enrolledCourses = [];
+    }
+
+    // Ensure the courseData.enrolledStudents is an array
+    if (!Array.isArray(courseData.enrolledStudents)) {
+      console.log(
+        "Course enrolledStudents not an array, initializing as empty array"
+      );
+      courseData.enrolledStudents = [];
+    }
+
+    // Add user to course's enrolled students if not already enrolled
+    const userAlreadyInCourse = courseData.enrolledStudents.some(
+      (studentId) => studentId.toString() === userData._id.toString()
+    );
+
+    if (!userAlreadyInCourse) {
+      console.log(
+        `Adding user ${userData._id} to course's enrolled students array`
+      );
+      courseData.enrolledStudents.push(userData._id);
+      await courseData.save();
+      console.log(
+        `Successfully updated course ${courseData._id} enrolled students`
+      );
+    } else {
+      console.log(
+        `User ${userData._id} already in course's enrolled students array`
+      );
+    }
+
+    // Add course to user's enrolled courses if not already enrolled
+    const courseAlreadyEnrolled = userData.enrolledCourses.some(
+      (courseId) => courseId.toString() === courseData._id.toString()
+    );
+
+    if (!courseAlreadyEnrolled) {
+      console.log(
+        `Adding course ${courseData._id} to user's enrolled courses array`
+      );
+      userData.enrolledCourses.push(courseData._id);
+      await userData.save();
+      console.log(`Successfully updated user ${userData._id} enrolled courses`);
+    } else {
+      console.log(
+        `Course ${courseData._id} already in user's enrolled courses array`
+      );
+    }
+
+    // Update or create the purchase
+    if (purchaseData) {
+      const updateData = {
+        status: "completed",
+        completedAt: new Date(),
+      };
+
+      // Check if the price was adjusted (had a minimum charge applied)
+      if (purchaseData.priceAdjusted) {
+        console.log(
+          `This purchase had price adjustment applied. Original price: ${purchaseData.originalAmount}`
+        );
+      }
+
+      console.log(
+        `Updating existing purchase: ${purchaseId} to completed status`
+      );
+      await Purchase.findByIdAndUpdate(purchaseId, updateData);
+      console.log(`Payment completed for purchase: ${purchaseId}`);
+    } else if (userId && courseId) {
+      // Create a new purchase record as fallback
+      console.log(
+        `Creating new purchase record for user ${userId} and course ${courseId}`
+      );
+      const newPurchase = await Purchase.create({
+        userId,
+        courseId,
+        amount: courseData.coursePrice,
+        status: "completed",
+        completedAt: new Date(),
+      });
+      console.log(`Created new purchase record: ${newPurchase._id}`);
+    }
+
+    // Double-check that the enrollment was successful
+    console.log(`Verifying enrollment by querying user data again`);
+    const updatedUser = await User.findById(userData._id);
+
+    const isEnrolled = updatedUser.enrolledCourses.some(
+      (id) => id.toString() === courseData._id.toString()
+    );
+
+    if (!isEnrolled) {
+      console.error(
+        `Enrollment verification failed - course not found in user's enrolledCourses after save`
+      );
+      // Force add the course one more time with a different method
+      await User.findByIdAndUpdate(userData._id, {
+        $addToSet: { enrolledCourses: courseData._id },
+      });
+      console.log(`Forced enrollment using $addToSet operator`);
+
+      // Verify one more time
+      const finalCheck = await User.findById(userData._id);
+      const finalEnrolled = finalCheck.enrolledCourses.some(
+        (id) => id.toString() === courseData._id.toString()
+      );
+
+      if (!finalEnrolled) {
+        console.error(`CRITICAL: Final enrollment verification still failed!`);
+      } else {
+        console.log(`Final verification successful - user is now enrolled`);
+      }
+    } else {
+      console.log(
+        `Verification successful - user is properly enrolled in the course`
+      );
+    }
+
+    console.log(
+      `User ${userData._id} successfully enrolled in course ${courseData._id}`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(`Error updating enrollment data:`, error);
+    throw error;
+  }
+}

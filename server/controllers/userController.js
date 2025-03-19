@@ -53,7 +53,40 @@ export const userEnrolledCourses = async (req, res) => {
       });
     }
 
-    if (!userData.enrolledCourses || userData.enrolledCourses.length === 0) {
+    // Get directly enrolled courses (from user.enrolledCourses field)
+    let enrolledCourseIds = userData.enrolledCourses || [];
+    console.log(
+      `User has ${enrolledCourseIds.length} directly enrolled courses`
+    );
+
+    // Also fetch courses from the purchases collection that are completed
+    const completedPurchases = await Purchase.find({
+      userId: userId,
+      status: "completed",
+    });
+
+    console.log(
+      `Found ${completedPurchases.length} completed purchases for user`
+    );
+
+    // Add course IDs from purchases (if not already in the list)
+    const purchasedCourseIds = completedPurchases.map(
+      (purchase) => purchase.courseId
+    );
+
+    // Combine both lists without duplicates
+    const allCourseIds = [
+      ...new Set([
+        ...enrolledCourseIds.map((id) => id.toString()),
+        ...purchasedCourseIds.map((id) => id.toString()),
+      ]),
+    ].map((id) => id.toString());
+
+    console.log(
+      `Combined total: ${allCourseIds.length} unique enrolled courses`
+    );
+
+    if (allCourseIds.length === 0) {
       console.log(`User ${userId} has no enrolled courses`);
       return res.json({
         success: true,
@@ -61,100 +94,39 @@ export const userEnrolledCourses = async (req, res) => {
       });
     }
 
-    console.log(
-      `User has ${userData.enrolledCourses.length} enrolled courses. Populating course data...`
-    );
-
-    // Make sure enrolledCourses is an array of valid ObjectIds
-    const validCourseIds = userData.enrolledCourses.filter(
-      (id) => id && id.toString()
-    );
-    console.log(`Found ${validCourseIds.length} valid course IDs`);
-
     try {
-      // Use populate with a detailed path to ensure we get all course data
-      const populatedUser = await User.findById(userId)
+      // Get courses data for all course IDs
+      const courses = await Course.find({
+        _id: { $in: allCourseIds },
+      })
         .populate({
-          path: "enrolledCourses",
-          populate: {
-            path: "educator",
-            select: "name imageUrl",
-          },
+          path: "educator",
+          select: "name imageUrl",
         })
-        .lean(); // Use lean for better performance
+        .lean();
 
-      console.log(
-        `Successfully fetched and populated ${
-          populatedUser.enrolledCourses
-            ? populatedUser.enrolledCourses.length
-            : 0
-        } courses`
-      );
+      console.log(`Successfully fetched ${courses.length} courses`);
 
-      // Check for any null values in populated courses
-      const validCourses = populatedUser.enrolledCourses.filter(
-        (course) => course !== null
-      );
-
-      if (validCourses.length < validCourseIds.length) {
-        console.warn(
-          `Some courses (${
-            validCourseIds.length - validCourses.length
-          }) could not be populated properly`
-        );
-
-        // Get the courses directly as a backup method
-        const directCourses = await Course.find({
-          _id: { $in: validCourseIds },
-        })
-          .populate({
-            path: "educator",
-            select: "name imageUrl",
-          })
-          .lean();
-
-        console.log(`Found ${directCourses.length} courses with direct query`);
-
-        return res.json({
-          success: true,
-          enrolledCourses:
-            directCourses.length > 0 ? directCourses : validCourses,
-        });
-      }
+      // Also look for pending purchases to inform the frontend
+      const pendingPurchases = await Purchase.find({
+        userId: userId,
+        status: { $in: ["pending", "processing"] },
+      }).select("courseId status createdAt");
 
       return res.json({
         success: true,
-        enrolledCourses: validCourses,
+        enrolledCourses: courses,
+        pendingPurchases: pendingPurchases,
       });
-    } catch (populateError) {
-      console.error(`Error during population: ${populateError.message}`);
-
-      // Fallback to direct course lookup
-      try {
-        const directCourses = await Course.find({
-          _id: { $in: validCourseIds },
-        })
-          .populate({
-            path: "educator",
-            select: "name imageUrl",
-          })
-          .lean();
-
-        console.log(
-          `Found ${directCourses.length} courses with fallback query`
-        );
-
-        return res.json({
-          success: true,
-          enrolledCourses: directCourses,
-        });
-      } catch (fallbackError) {
-        console.error(`Fallback query failed: ${fallbackError.message}`);
-        throw fallbackError;
-      }
+    } catch (error) {
+      console.error(`Error fetching course data: ${error.message}`);
+      return res.status(500).json({
+        success: false,
+        message: `Error fetching course data: ${error.message}`,
+      });
     }
   } catch (error) {
-    console.error(`Error fetching enrolled courses: ${error.message}`);
+    console.error(`Error in userEnrolledCourses: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: error.message,
@@ -218,13 +190,16 @@ export const purchaseCourse = async (req, res) => {
       });
     }
 
+    // Calculate the course price after discount
+    const discountedPrice = (
+      courseData.coursePrice -
+      (courseData.discount * courseData.coursePrice) / 100
+    ).toFixed(2);
+
     const purchaseData = {
       courseId: courseData._id,
       userId,
-      amount: (
-        courseData.coursePrice -
-        (courseData.discount * courseData.coursePrice) / 100
-      ).toFixed(2),
+      amount: discountedPrice,
     };
 
     console.log("Creating purchase with data:", purchaseData);
@@ -299,6 +274,49 @@ export const purchaseCourse = async (req, res) => {
     const currency = process.env.CURRENCY.toLowerCase();
     console.log("Using currency:", currency);
 
+    // Get the minimum price required based on currency
+    let minimumAmount = 50; // Default 50 cents for USD
+    let rawAmount = Math.floor(newPurchase.amount) * 100;
+
+    // Check if the amount meets Stripe's minimum requirement (approx 50 cents USD)
+    if (currency === "inr") {
+      minimumAmount = 50; // ₹50 is safe for INR
+
+      // If price is below minimum, adjust to the minimum
+      if (rawAmount < minimumAmount) {
+        console.log(
+          `Adjusting price from ${rawAmount} to ${minimumAmount} to meet Stripe's minimum`
+        );
+        rawAmount = minimumAmount;
+
+        // Update the purchase record with adjusted amount
+        await Purchase.findByIdAndUpdate(newPurchase._id, {
+          amount: (minimumAmount / 100).toFixed(2),
+          originalAmount: newPurchase.amount,
+          priceAdjusted: true,
+        });
+
+        console.log(
+          `Updated purchase with adjusted amount: ${minimumAmount / 100}`
+        );
+      }
+    }
+
+    // For USD and other currencies
+    if (currency === "usd" && rawAmount < 50) {
+      console.log(
+        `Adjusting price from ${rawAmount} to 50 cents to meet Stripe's minimum`
+      );
+      rawAmount = 50; // 50 cents minimum for USD
+
+      // Update the purchase record
+      await Purchase.findByIdAndUpdate(newPurchase._id, {
+        amount: 0.5,
+        originalAmount: newPurchase.amount,
+        priceAdjusted: true,
+      });
+    }
+
     //Creating line items to for Stripe
     const line_items = [
       {
@@ -309,7 +327,7 @@ export const purchaseCourse = async (req, res) => {
             description: `Enrollment for course: ${courseData.courseTitle}`,
             images: [courseData.courseThumbnail],
           },
-          unit_amount: Math.floor(newPurchase.amount) * 100,
+          unit_amount: rawAmount,
         },
         quantity: 1,
       },
@@ -318,7 +336,7 @@ export const purchaseCourse = async (req, res) => {
     // Add a timestamp to prevent caching issues
     const timestamp = new Date().getTime();
 
-    console.log("Creating Stripe checkout session");
+    console.log("Creating Stripe checkout session with amount:", rawAmount);
     const session = await stripeInstance.checkout.sessions.create({
       success_url: `${origin}/loading/my-enrollments?t=${timestamp}`,
       cancel_url: `${origin}/course/${courseId}`,
@@ -330,6 +348,8 @@ export const purchaseCourse = async (req, res) => {
         courseId: courseId,
         courseTitle: courseData.courseTitle,
         timestamp: timestamp.toString(),
+        priceAdjusted:
+          rawAmount !== Math.floor(newPurchase.amount) * 100 ? "true" : "false",
       },
     });
 
@@ -379,37 +399,67 @@ export const checkEnrollmentStatus = async (req, res) => {
       (id) => id.toString() === courseId.toString()
     );
 
-    console.log(
-      `User ${userId} enrollment status for course ${courseId}: ${
-        isEnrolled ? "Enrolled" : "Not enrolled"
-      }`
-    );
-
-    // Check purchase status if not enrolled
+    // If not enrolled, check for pending purchase
+    let isPending = false;
     if (!isEnrolled) {
-      const purchase = await Purchase.findOne({
+      const pendingPurchase = await Purchase.findOne({
         userId,
         courseId,
         status: { $in: ["pending", "processing"] },
       });
 
-      const isPending = !!purchase;
-      console.log(
-        `Purchase status for course ${courseId}: ${
-          isPending ? purchase.status : "No pending purchase"
-        }`
-      );
+      isPending = !!pendingPurchase;
 
-      return res.json({
-        success: true,
-        isEnrolled,
-        isPending,
-      });
+      // Also check completed purchases that might not have updated the user's enrolledCourses
+      if (!isPending) {
+        const completedPurchase = await Purchase.findOne({
+          userId,
+          courseId,
+          status: "completed",
+        });
+
+        if (completedPurchase) {
+          // If we found a completed purchase but the user wasn't marked as enrolled,
+          // update the user's enrolledCourses
+          console.log(
+            `Found completed purchase ${completedPurchase._id} but user not marked as enrolled. Fixing...`
+          );
+
+          // Add to enrolledCourses if not already there
+          if (!userData.enrolledCourses.includes(courseId)) {
+            userData.enrolledCourses.push(courseId);
+            await userData.save();
+            console.log(`Added course ${courseId} to user's enrolledCourses`);
+          }
+
+          // Also update the course's enrolledStudents
+          const courseData = await Course.findById(courseId);
+          if (courseData && !courseData.enrolledStudents.includes(userId)) {
+            courseData.enrolledStudents.push(userId);
+            await courseData.save();
+            console.log(`Added user ${userId} to course's enrolledStudents`);
+          }
+
+          // Now the user is enrolled
+          return res.json({
+            success: true,
+            isEnrolled: true,
+            fixedInconsistency: true,
+          });
+        }
+      }
     }
+
+    console.log(
+      `Enrollment status: ${
+        isEnrolled ? "Enrolled" : isPending ? "Pending" : "Not enrolled"
+      }`
+    );
 
     return res.json({
       success: true,
       isEnrolled,
+      isPending,
     });
   } catch (error) {
     console.error(`Error checking enrollment status: ${error.message}`);
@@ -439,7 +489,6 @@ export const unenrollFromCourse = async (req, res) => {
 
     // Find the user and course
     const user = await User.findById(userId);
-    const course = await Course.findById(courseId);
 
     if (!user) {
       console.log(`User ${userId} not found`);
@@ -449,52 +498,99 @@ export const unenrollFromCourse = async (req, res) => {
       });
     }
 
-    if (!course) {
-      console.log(`Course ${courseId} not found`);
-      return res.status(404).json({
-        success: false,
-        message: "Course not found",
+    // Normalize the course ID to string for comparison
+    const courseIdStr = courseId.toString();
+
+    // Check if the user is enrolled in this course - compare as strings to avoid ObjectId issues
+    const enrolledCourseIds = user.enrolledCourses.map((id) => id.toString());
+    const isEnrolled = enrolledCourseIds.includes(courseIdStr);
+
+    console.log(`User has ${enrolledCourseIds.length} enrolled courses`);
+    console.log(
+      `Course ${courseIdStr} found in enrolled courses: ${isEnrolled}`
+    );
+
+    // If not directly enrolled, check if there's a purchase record
+    if (!isEnrolled) {
+      const purchaseRecord = await Purchase.findOne({
+        userId,
+        courseId,
+        status: "completed",
       });
+
+      if (!purchaseRecord) {
+        console.log(
+          `No purchase record found for user ${userId} and course ${courseId}`
+        );
+        return res.status(400).json({
+          success: false,
+          message: "You are not enrolled in this course",
+        });
+      }
+
+      console.log(
+        `Found purchase record for course ${courseId}, proceeding with removal`
+      );
     }
 
-    // Check if the user is enrolled in this course
-    const isEnrolled = user.enrolledCourses.some(
-      (id) => id.toString() === courseId
-    );
-    if (!isEnrolled) {
-      console.log(`User ${userId} is not enrolled in course ${courseId}`);
-      return res.status(400).json({
-        success: false,
-        message: "You are not enrolled in this course",
-      });
+    // Find the course - we'll do this regardless of enrollment status
+    const course = await Course.findById(courseId);
+
+    if (!course) {
+      console.log(`Course ${courseId} not found`);
+      // If the course doesn't exist but we have an enrollment record, still remove it
+      console.log(
+        `Removing non-existent course ${courseId} from user's enrollments`
+      );
+    } else {
+      console.log(`Course found: ${course.courseTitle}`);
     }
 
     console.log(
       `Removing course ${courseId} from user ${userId}'s enrollments`
     );
 
-    // Remove the course from user's enrolled courses
-    user.enrolledCourses = user.enrolledCourses.filter(
-      (id) => id.toString() !== courseId
-    );
+    // Remove the course from user's enrolled courses - filter by string comparison
+    if (user.enrolledCourses && user.enrolledCourses.length > 0) {
+      user.enrolledCourses = user.enrolledCourses.filter(
+        (id) => id.toString() !== courseIdStr
+      );
+    }
 
     // Remove any course progress data
     if (user.courseProgress) {
       user.courseProgress = user.courseProgress.filter(
         (progress) =>
-          progress.courseId && progress.courseId.toString() !== courseId
+          !progress.courseId || progress.courseId.toString() !== courseIdStr
       );
     }
 
     await user.save();
+    console.log(`Updated user's enrolled courses list`);
 
-    // Remove the user from course's enrolled students
-    if (course.enrolledStudents) {
+    // Remove the user from course's enrolled students if the course exists
+    if (course && course.enrolledStudents) {
       course.enrolledStudents = course.enrolledStudents.filter(
-        (id) => id.toString() !== userId
+        (id) => id.toString() !== userId.toString()
       );
 
       await course.save();
+      console.log(`Removed user from course's enrolled students list`);
+    }
+
+    // Delete any purchase records for this course and user
+    try {
+      const deletedPurchases = await Purchase.deleteMany({
+        userId: userId,
+        courseId: courseId,
+      });
+
+      console.log(
+        `Deleted ${deletedPurchases.deletedCount} purchase records for course ${courseId}`
+      );
+    } catch (error) {
+      console.error(`Error deleting purchase records: ${error.message}`);
+      // Continue with the operation even if purchase deletion fails
     }
 
     console.log(
@@ -510,6 +606,114 @@ export const unenrollFromCourse = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to unenroll from course",
+    });
+  }
+};
+
+// Direct Enrollment (bypassing payment)
+export const directEnrollCourse = async (req, res) => {
+  try {
+    console.log("Direct enrollment request received:", req.body);
+    const { courseId } = req.body;
+
+    if (!courseId) {
+      return res.status(400).json({
+        success: false,
+        message: "Course ID is required",
+      });
+    }
+
+    const userId = req.auth.userId;
+    console.log("User ID from auth:", userId);
+
+    // Create user if not exists
+    let userData = await User.findById(userId);
+    if (!userData) {
+      console.log("User not found, creating new user");
+      userData = await User.create({
+        _id: userId,
+        name: "User",
+        email: "user@example.com",
+        imageUrl: "https://ui-avatars.com/api/?name=User",
+      });
+    }
+
+    const courseData = await Course.findById(courseId);
+
+    console.log("User found:", !!userData);
+    console.log("Course found:", !!courseData);
+
+    if (!courseData) {
+      return res.status(404).json({
+        success: false,
+        message: "Course not found",
+      });
+    }
+
+    // Use string comparison to check enrollment properly
+    const isEnrolled = userData.enrolledCourses.some(
+      (id) => id.toString() === courseId.toString()
+    );
+
+    // Check if user is already enrolled in this course
+    if (isEnrolled) {
+      console.log(`User ${userId} is already enrolled in course ${courseId}`);
+      return res.status(400).json({
+        success: false,
+        message: "You are already enrolled in this course",
+      });
+    }
+
+    // Calculate the course price after discount
+    const discountedPrice = (
+      courseData.coursePrice -
+      (courseData.discount * courseData.coursePrice) / 100
+    ).toFixed(2);
+
+    // Create a purchase record
+    const purchaseData = {
+      courseId: courseData._id,
+      userId,
+      amount: discountedPrice,
+      status: "completed", // Mark as completed immediately
+      completedAt: new Date(),
+    };
+
+    console.log("Creating completed purchase record:", purchaseData);
+    const newPurchase = await Purchase.create(purchaseData);
+    console.log("Purchase created:", newPurchase._id);
+
+    try {
+      // Add course to user's enrolled courses
+      console.log(`Adding course ${courseId} to user's enrolled courses`);
+      userData.enrolledCourses.push(courseData._id);
+      await userData.save();
+
+      // Add user to course's enrolled students
+      console.log(`Adding user ${userId} to course's enrolled students`);
+      courseData.enrolledStudents.push(userId);
+      await courseData.save();
+
+      console.log(
+        `Direct enrollment complete for user ${userId} in course ${courseId}`
+      );
+    } catch (error) {
+      console.error("Error during direct enrollment:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Error during enrollment: " + error.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Enrollment successful",
+    });
+  } catch (error) {
+    console.error("Direct enrollment error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 };

@@ -1,23 +1,20 @@
 import React, { useContext, useEffect, useState } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { AppContext } from "../../context/AppContext";
 import Loading from "../../components/student/Loading";
 import { assets } from "../../assets/assets";
 import humanizeDuration from "humanize-duration";
 import Footer from "../../components/student/Footer";
 import YouTube from "react-youtube";
-import { toast } from "react-toastify";
 
 const CourseDetails = () => {
   const { id } = useParams();
-  const location = useLocation();
 
   const [courseData, setcourseData] = useState(null);
   const [openSections, setOpenSections] = useState({});
   const [isAlreadyEnrolled, setIsAlreadyEnrolled] = useState(false);
   const [playerData, setPlayerData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [checkingEnrollment, setCheckingEnrollment] = useState(true);
 
   const {
     allCourses,
@@ -26,162 +23,56 @@ const CourseDetails = () => {
     calculateCourseDuration,
     calculateChapterTime,
     currency,
-    getToken,
     navigate,
     enrolledCourses,
-    fetchUserEnrolledCourses,
-    markCourseAsPurchasing,
-    clearPurchasingCourse,
+    isEnrolledInCourse,
+    directEnroll,
   } = useContext(AppContext);
-
-  // Check if user is enrolled in this course
-  const checkEnrollmentStatus = async () => {
-    setCheckingEnrollment(true);
-    console.log(`Checking enrollment status for course ${id}`);
-
-    try {
-      // First refresh the enrolled courses data
-      const token = await getToken();
-      if (!token) {
-        console.log("No token available to check enrollment");
-        setCheckingEnrollment(false);
-        return;
-      }
-
-      // Refresh enrolled courses with a timestamp to prevent caching
-      await fetchUserEnrolledCourses(token);
-
-      // Check if this course is in the enrolled courses array
-      const isEnrolled = enrolledCourses.some((course) => course._id === id);
-      console.log(
-        `Course ${id} enrollment status: ${
-          isEnrolled ? "Enrolled" : "Not enrolled"
-        }`
-      );
-
-      // Check direct from API as a backup
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/user/data`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-          cache: "no-store",
-        }
-      );
-
-      const data = await response.json();
-      const apiEnrolled =
-        data.success && data.user.enrolledCourses.includes(id);
-
-      console.log(
-        `API enrollment check for course ${id}: ${
-          apiEnrolled ? "Enrolled" : "Not enrolled"
-        }`
-      );
-
-      // Use either the context data or API data, whichever indicates enrollment
-      setIsAlreadyEnrolled(isEnrolled || apiEnrolled);
-    } catch (error) {
-      console.error("Error checking enrollment status:", error);
-      toast.error("Couldn't verify enrollment status");
-    } finally {
-      setCheckingEnrollment(false);
-    }
-  };
 
   const fetchCourseData = async () => {
     const findCourse = allCourses.find((course) => course._id === id);
     setcourseData(findCourse);
-    await checkEnrollmentStatus();
+    setIsAlreadyEnrolled(isEnrolledInCourse(id));
   };
 
-  // Handle enrollment process
+  // Handle enrollment process - simplified version
   const handleEnrollment = async () => {
-    if (isAlreadyEnrolled) return;
+    if (isAlreadyEnrolled || isLoading) {
+      return; // Prevent multiple clicks
+    }
 
     try {
       setIsLoading(true);
-      const token = await getToken();
 
-      if (!token) {
-        toast.error("Authentication error. Please login again.");
-        setIsLoading(false);
-        return;
-      }
+      // Use the direct enroll function (no API calls)
+      const success = directEnroll(id);
 
-      // Mark this course as being purchased - will be remembered across page reloads
-      markCourseAsPurchasing(id);
+      if (success) {
+        // No success notification, just set state and redirect
+        setIsAlreadyEnrolled(true);
 
-      console.log(
-        "Making enrollment request with token:",
-        token.substring(0, 10) + "..."
-      );
-      console.log("Course ID:", id);
-
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/user/purchase`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            courseId: id,
-          }),
-        }
-      );
-
-      const data = await response.json();
-      console.log("Enrollment response:", data);
-
-      setIsLoading(false);
-
-      if (data.success) {
-        if (data.session_url) {
-          // Stripe payment flow - we've already marked the course as purchasing
-          window.location.href = data.session_url;
-        } else if (data.redirectUrl) {
-          // Auto-enrolled in development mode
-          toast.success("Successfully enrolled in the course!");
-          navigate(data.redirectUrl);
-        } else {
-          // No redirect URL or session URL provided
-          toast.success("Enrollment successful!");
+        // Navigate to my enrollments page
+        setTimeout(() => {
           navigate("/my-enrollments");
-        }
-      } else {
-        // Clear purchasing state if enrollment fails
-        clearPurchasingCourse();
-        const errorMessage = data.message || "Unknown error occurred";
-        console.error("Enrollment failed:", errorMessage);
-        toast.error("Failed to enroll: " + errorMessage);
+        }, 1000);
       }
     } catch (error) {
-      // Clear purchasing state if enrollment fails
-      clearPurchasingCourse();
-      setIsLoading(false);
       console.error("Error during enrollment:", error);
-      toast.error(
-        "Failed to enroll. Please try again. Error: " + error.message
-      );
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  // Check enrollment status whenever we come back to this page or enrolled courses change
-  useEffect(() => {
-    if (id) {
-      checkEnrollmentStatus();
-    }
-  }, [id, enrolledCourses, location.pathname]);
 
   useEffect(() => {
     fetchCourseData();
   }, [allCourses, id]);
+
+  // Update enrollment status when enrolled courses change
+  useEffect(() => {
+    if (id) {
+      setIsAlreadyEnrolled(isEnrolledInCourse(id));
+    }
+  }, [enrolledCourses, id, isEnrolledInCourse]);
 
   const toggleSection = (index) => {
     setOpenSections((prev) => ({ ...prev, [index]: !prev[index] }));
@@ -388,17 +279,59 @@ const CourseDetails = () => {
               </div>
             </div>
 
-            <button
-              className="md:mt-6 mt-4 w-full py-3 rounded bg-blue-600 text-white font-medium"
-              onClick={handleEnrollment}
-              disabled={isAlreadyEnrolled || isLoading}
-            >
-              {isLoading
-                ? "Processing..."
-                : isAlreadyEnrolled
-                ? "Already Enrolled"
-                : "Enroll Now"}
-            </button>
+            <div>
+              <button
+                className={`md:mt-6 mt-4 w-full py-3 rounded font-medium transition-all cursor-pointer ${
+                  isAlreadyEnrolled
+                    ? "bg-green-600 text-white"
+                    : isLoading
+                    ? "bg-gray-500 text-white"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
+                }`}
+                onClick={handleEnrollment}
+                disabled={isAlreadyEnrolled || isLoading}
+              >
+                {isLoading ? (
+                  <div className="flex items-center justify-center">
+                    <svg
+                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    Processing
+                  </div>
+                ) : isAlreadyEnrolled ? (
+                  "Already Enrolled"
+                ) : (
+                  "Enroll Now"
+                )}
+              </button>
+
+              {courseData &&
+                ((currency === "₹" && courseData.coursePrice < 50) ||
+                  (currency === "$" && courseData.coursePrice < 0.5)) && (
+                  <p className="text-xs text-gray-500 mt-1 text-center">
+                    Note: A minimum charge of{" "}
+                    {currency === "₹" ? "₹50" : "$0.50"} may apply due to
+                    payment processor requirements.
+                  </p>
+                )}
+            </div>
 
             <div className="pt-6">
               <p className="md:text-xl text-lg font-medium text-gray-800">

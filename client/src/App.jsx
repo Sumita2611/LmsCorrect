@@ -13,8 +13,6 @@ import MyCourses from "./pages/educator/MyCourses";
 import StudentsEnrolled from "./pages/educator/StudentsEnrolled";
 import Navbar from "./components/student/Navbar";
 import "quill/dist/quill.snow.css";
-import { ToastContainer } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
 
 const App = () => {
   const isEducatorRoute = useMatch("/educator/*");
@@ -38,18 +36,6 @@ const App = () => {
           <Route path="student-enrolled" element={<StudentsEnrolled />} />
         </Route>
       </Routes>
-
-      <ToastContainer
-        position="top-right"
-        autoClose={3000}
-        hideProgressBar={false}
-        newestOnTop
-        closeOnClick
-        rtl={false}
-        pauseOnFocusLoss
-        draggable
-        pauseOnHover
-      />
     </div>
   );
 };

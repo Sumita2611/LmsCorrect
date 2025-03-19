@@ -5,6 +5,7 @@ import {
   userEnrolledCourses,
   unenrollFromCourse,
   checkEnrollmentStatus,
+  directEnrollCourse,
 } from "../controllers/userController.js";
 
 const userRouter = express.Router();
@@ -12,6 +13,7 @@ const userRouter = express.Router();
 userRouter.get("/data", getUserData);
 userRouter.get("/enrolled-courses", userEnrolledCourses);
 userRouter.post("/purchase", purchaseCourse);
+userRouter.post("/direct-enroll", directEnrollCourse);
 userRouter.post("/unenroll", unenrollFromCourse);
 userRouter.get("/enrollment-status/:courseId", checkEnrollmentStatus);
 

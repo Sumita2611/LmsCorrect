@@ -117,8 +117,8 @@ const MyCourses = () => {
   if (loading) return <Loading />;
 
   return (
-    <div className="h-screen flex flex-col items-start justify-between md:p-8 md:pb-0 p-4 pt-8 pb-0">
-      <div className="w-full">
+    <div className="min-h-[calc(100vh-180px)] flex flex-col pb-20 md:p-8 md:pb-20 p-4 pt-8">
+      <div className="w-full flex-1">
         <div className="flex justify-between items-center pb-4">
           <h2 className="text-lg font-medium">My Courses</h2>
           <button
@@ -149,7 +149,7 @@ const MyCourses = () => {
             </button>
           </div>
         ) : (
-          <div className="flex flex-col items-center max-w-4xl w-full overflow-hidden rounded-md bg-white border border-gray-500/20">
+          <div className="flex flex-col items-center max-w-4xl w-full overflow-hidden rounded-md bg-white border border-gray-500/20 mb-8">
             <table className="md:table-auto table-fixed w-full overflow-hidden">
               <thead className="text-gray-900 border-b border-gray-500/20 text-sm text-left">
                 <tr>

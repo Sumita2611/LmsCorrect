@@ -3,7 +3,6 @@ import { dummyCourses } from "../assets/assets";
 import { useNavigate } from "react-router-dom";
 import humanizeDuration from "humanize-duration";
 import { useAuth, useUser } from "@clerk/clerk-react";
-import { toast } from "react-toastify";
 
 export const AppContext = createContext();
 
@@ -18,36 +17,75 @@ export const AppContextProvider = (props) => {
   const [isEducator, setIsEducator] = useState(true);
   const [enrolledCourses, setEnrolledCourses] = useState([]);
   const [userData, setUserData] = useState(null);
-  const [purchasingCourse, setPurchasingCourse] = useState(null);
-  const [lastEnrollmentAttempt, setLastEnrollmentAttempt] = useState(null);
 
-  // Function to mark a course as being purchased
-  const markCourseAsPurchasing = (courseId) => {
-    console.log(`Marking course ${courseId} as being purchased`);
+  // Function to directly enroll in a course (local state only)
+  const directEnroll = (courseId) => {
+    console.log(`Enrolling in course ${courseId} (local state only)`);
 
-    // Save to both state and localStorage for persistence across page reloads
-    setPurchasingCourse(courseId);
-    setLastEnrollmentAttempt(new Date().toISOString());
+    // Find the course in allCourses
+    const courseToEnroll = allCourses.find((course) => course._id === courseId);
 
-    localStorage.setItem("purchasingCourseId", courseId);
-    localStorage.setItem("enrollmentAttemptTime", new Date().toISOString());
+    if (!courseToEnroll) {
+      console.error(`Course ${courseId} not found in available courses`);
+      return false;
+    }
+
+    // Check if already enrolled
+    if (enrolledCourses.some((course) => course._id === courseId)) {
+      console.log(`Already enrolled in course ${courseId}`);
+      return true;
+    }
+
+    // Add to enrolled courses
+    setEnrolledCourses((prev) => [...prev, courseToEnroll]);
+
+    // Store in localStorage to persist across refreshes
+    try {
+      // Get existing enrolled course IDs from localStorage
+      const existingIds = JSON.parse(
+        localStorage.getItem("enrolledCourseIds") || "[]"
+      );
+
+      // Add the new course ID if it's not already there
+      if (!existingIds.includes(courseId)) {
+        existingIds.push(courseId);
+        localStorage.setItem("enrolledCourseIds", JSON.stringify(existingIds));
+      }
+    } catch (error) {
+      console.error("Error saving enrollment to localStorage:", error);
+    }
+
+    console.log(`Successfully enrolled in course ${courseId}`);
+    return true;
   };
 
-  // Function to clear purchasing course state
-  const clearPurchasingCourse = () => {
-    console.log("Clearing purchasing course state");
-    setPurchasingCourse(null);
-    setLastEnrollmentAttempt(null);
+  // Function to remove a course from enrollments
+  const removeEnrollment = (courseId) => {
+    console.log(`Removing course ${courseId} from enrollments`);
 
-    // Remove from localStorage - use both possible key names for maximum cleanup
-    localStorage.removeItem("purchasingCourseId");
-    localStorage.removeItem("purchasingCourse");
-    localStorage.removeItem("enrollmentAttemptTime");
+    // Update state
+    setEnrolledCourses((prev) =>
+      prev.filter((course) => course._id !== courseId)
+    );
+
+    // Update localStorage
+    try {
+      const existingIds = JSON.parse(
+        localStorage.getItem("enrolledCourseIds") || "[]"
+      );
+      const updatedIds = existingIds.filter((id) => id !== courseId);
+      localStorage.setItem("enrolledCourseIds", JSON.stringify(updatedIds));
+    } catch (error) {
+      console.error("Error updating localStorage:", error);
+    }
+
+    return true;
   };
 
-  // Check if a course is currently being purchased
-  const isCoursePurchasing = () => {
-    return purchasingCourse !== null;
+  // Function to check if a user is enrolled in a course
+  const isEnrolledInCourse = (courseId) => {
+    if (!enrolledCourses || enrolledCourses.length === 0) return false;
+    return enrolledCourses.some((course) => course._id === courseId);
   };
 
   //Fetch all courses
@@ -121,47 +159,7 @@ export const AppContextProvider = (props) => {
     return totalLectures;
   };
 
-  // Function to manually check if a course is in enrolledCourses
-  const isEnrolledInCourse = (courseId) => {
-    if (!enrolledCourses || enrolledCourses.length === 0) return false;
-    return enrolledCourses.some((course) => course._id === courseId);
-  };
-
-  // Function to check enrollment status directly from the API
-  const checkEnrollmentStatusAPI = async (courseId) => {
-    try {
-      const token = await getToken();
-      if (!token) {
-        console.error("No authentication token available");
-        return {
-          success: false,
-          isEnrolled: false,
-          error: "No authentication token",
-        };
-      }
-
-      const response = await fetch(
-        `${
-          import.meta.env.VITE_API_URL
-        }/api/user/enrollment-status/${courseId}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache",
-          },
-        }
-      );
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error("Error checking enrollment status:", error);
-      return { success: false, isEnrolled: false, error: error.message };
-    }
-  };
-
-  //Fetch user data and enrolled courses
+  // Fetch user data and enrolled courses
   const fetchUserData = async () => {
     if (!user) return;
 
@@ -195,7 +193,6 @@ export const AppContextProvider = (props) => {
 
       if (data.success) {
         setUserData(data.user);
-        await fetchUserEnrolledCourses(token);
       } else {
         console.error("Failed to fetch user data:", data.message);
       }
@@ -204,94 +201,33 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  //Fetch user enrolled courses
-  const fetchUserEnrolledCourses = async (tokenParam) => {
-    if (!user) return;
-
+  // Load enrolled courses from localStorage
+  useEffect(() => {
+    // Load enrolled course IDs from localStorage
     try {
-      const token = tokenParam || (await getToken());
-      console.log(
-        "Fetching enrolled courses with token:",
-        token ? token.substring(0, 10) + "..." : "No token"
+      const storedCourseIds = JSON.parse(
+        localStorage.getItem("enrolledCourseIds") || "[]"
       );
 
-      if (!token) {
-        console.error("No authentication token available");
-        return;
-      }
+      if (storedCourseIds.length > 0 && allCourses.length > 0) {
+        console.log(`Found ${storedCourseIds.length} stored enrolled courses`);
 
-      // Add a timestamp to avoid cached responses
-      const timestamp = new Date().getTime();
-
-      const response = await fetch(
-        `${
-          import.meta.env.VITE_API_URL
-        }/api/user/enrolled-courses?_=${timestamp}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-          cache: "no-store",
-        }
-      );
-
-      const data = await response.json();
-      console.log("Enrolled courses response:", data);
-
-      if (data.success) {
-        console.log(
-          `Found ${data.enrolledCourses.length} enrolled courses:`,
-          data.enrolledCourses.map((course) => course.courseTitle).join(", ")
+        // Get the full course objects for the stored IDs
+        const storedCourses = allCourses.filter((course) =>
+          storedCourseIds.includes(course._id)
         );
-        setEnrolledCourses(data.enrolledCourses);
 
-        // Check if the course being purchased is now in enrolled courses
-        if (
-          purchasingCourse &&
-          data.enrolledCourses.some((course) => course._id === purchasingCourse)
-        ) {
+        if (storedCourses.length > 0) {
           console.log(
-            `Course ${purchasingCourse} is now in enrolled courses, clearing purchasing state`
+            `Loaded ${storedCourses.length} courses from localStorage`
           );
-          clearPurchasingCourse();
-          toast.success("Successfully enrolled in the course!");
+          setEnrolledCourses(storedCourses);
         }
-      } else {
-        console.error("Failed to fetch enrolled courses:", data.message);
-        // Don't fallback to dummy data here, could confuse the user
       }
     } catch (error) {
-      console.error("Error fetching enrolled courses:", error);
-      // Don't fallback to dummy data here, could confuse the user
+      console.error("Error loading enrolled courses from localStorage:", error);
     }
-  };
-
-  // Check for stored purchasing course on load
-  useEffect(() => {
-    const storedCourseId = localStorage.getItem("purchasingCourseId");
-    const storedAttemptTime = localStorage.getItem("enrollmentAttemptTime");
-
-    if (storedCourseId) {
-      console.log(`Found stored purchasing course: ${storedCourseId}`);
-      setPurchasingCourse(storedCourseId);
-      setLastEnrollmentAttempt(storedAttemptTime);
-
-      // Clear if it's been more than 24 hours
-      if (storedAttemptTime) {
-        const attemptTime = new Date(storedAttemptTime);
-        const now = new Date();
-        const hoursSinceAttempt = (now - attemptTime) / (1000 * 60 * 60);
-
-        if (hoursSinceAttempt > 24) {
-          console.log("Clearing stale purchasing course (older than 24 hours)");
-          clearPurchasingCourse();
-        }
-      }
-    }
-  }, []);
+  }, [allCourses]);
 
   useEffect(() => {
     fetchAllCourses();
@@ -314,18 +250,14 @@ export const AppContextProvider = (props) => {
     calculateCourseDuration,
     calculateChapterTime,
     enrolledCourses,
-    fetchUserEnrolledCourses,
+    setEnrolledCourses,
     userData,
     getToken,
     backendUrl: import.meta.env.VITE_API_URL,
     fetchAllCourses,
-    markCourseAsPurchasing,
-    clearPurchasingCourse,
-    isCoursePurchasing,
-    purchasingCourse,
     isEnrolledInCourse,
-    checkEnrollmentStatusAPI,
-    fetchUserData,
+    directEnroll,
+    removeEnrollment,
   };
 
   return (
