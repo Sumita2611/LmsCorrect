@@ -1,20 +1,23 @@
 import React, { useContext, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { AppContext } from "../../context/AppContext";
 import Loading from "../../components/student/Loading";
 import { assets } from "../../assets/assets";
 import humanizeDuration from "humanize-duration";
 import Footer from "../../components/student/Footer";
 import YouTube from "react-youtube";
+import { toast } from "react-toastify";
 
 const CourseDetails = () => {
   const { id } = useParams();
+  const location = useLocation();
 
   const [courseData, setcourseData] = useState(null);
   const [openSections, setOpenSections] = useState({});
   const [isAlreadyEnrolled, setIsAlreadyEnrolled] = useState(false);
   const [playerData, setPlayerData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [checkingEnrollment, setCheckingEnrollment] = useState(true);
 
   const {
     allCourses,
@@ -25,31 +28,75 @@ const CourseDetails = () => {
     currency,
     getToken,
     navigate,
+    enrolledCourses,
+    fetchUserEnrolledCourses,
+    markCourseAsPurchasing,
+    clearPurchasingCourse,
   } = useContext(AppContext);
 
-  const fetchCourseData = async () => {
-    const findCourse = allCourses.find((course) => course._id === id);
-    setcourseData(findCourse);
+  // Check if user is enrolled in this course
+  const checkEnrollmentStatus = async () => {
+    setCheckingEnrollment(true);
+    console.log(`Checking enrollment status for course ${id}`);
 
-    // Check if user is already enrolled in this course
     try {
+      // First refresh the enrolled courses data
       const token = await getToken();
+      if (!token) {
+        console.log("No token available to check enrollment");
+        setCheckingEnrollment(false);
+        return;
+      }
+
+      // Refresh enrolled courses with a timestamp to prevent caching
+      await fetchUserEnrolledCourses(token);
+
+      // Check if this course is in the enrolled courses array
+      const isEnrolled = enrolledCourses.some((course) => course._id === id);
+      console.log(
+        `Course ${id} enrollment status: ${
+          isEnrolled ? "Enrolled" : "Not enrolled"
+        }`
+      );
+
+      // Check direct from API as a backup
       const response = await fetch(
         `${import.meta.env.VITE_API_URL}/api/user/data`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
           },
+          cache: "no-store",
         }
       );
-      const data = await response.json();
 
-      if (data.success && data.user.enrolledCourses.includes(id)) {
-        setIsAlreadyEnrolled(true);
-      }
+      const data = await response.json();
+      const apiEnrolled =
+        data.success && data.user.enrolledCourses.includes(id);
+
+      console.log(
+        `API enrollment check for course ${id}: ${
+          apiEnrolled ? "Enrolled" : "Not enrolled"
+        }`
+      );
+
+      // Use either the context data or API data, whichever indicates enrollment
+      setIsAlreadyEnrolled(isEnrolled || apiEnrolled);
     } catch (error) {
       console.error("Error checking enrollment status:", error);
+      toast.error("Couldn't verify enrollment status");
+    } finally {
+      setCheckingEnrollment(false);
     }
+  };
+
+  const fetchCourseData = async () => {
+    const findCourse = allCourses.find((course) => course._id === id);
+    setcourseData(findCourse);
+    await checkEnrollmentStatus();
   };
 
   // Handle enrollment process
@@ -61,10 +108,13 @@ const CourseDetails = () => {
       const token = await getToken();
 
       if (!token) {
-        alert("Authentication error. Please login again.");
+        toast.error("Authentication error. Please login again.");
         setIsLoading(false);
         return;
       }
+
+      // Mark this course as being purchased - will be remembered across page reloads
+      markCourseAsPurchasing(id);
 
       console.log(
         "Making enrollment request with token:",
@@ -93,32 +143,45 @@ const CourseDetails = () => {
 
       if (data.success) {
         if (data.session_url) {
-          // Stripe payment flow
+          // Stripe payment flow - we've already marked the course as purchasing
           window.location.href = data.session_url;
         } else if (data.redirectUrl) {
           // Auto-enrolled in development mode
-          alert("Successfully enrolled in the course!");
+          toast.success("Successfully enrolled in the course!");
           navigate(data.redirectUrl);
         } else {
           // No redirect URL or session URL provided
-          alert("Enrollment successful!");
+          toast.success("Enrollment successful!");
           navigate("/my-enrollments");
         }
       } else {
+        // Clear purchasing state if enrollment fails
+        clearPurchasingCourse();
         const errorMessage = data.message || "Unknown error occurred";
         console.error("Enrollment failed:", errorMessage);
-        alert("Failed to enroll: " + errorMessage);
+        toast.error("Failed to enroll: " + errorMessage);
       }
     } catch (error) {
+      // Clear purchasing state if enrollment fails
+      clearPurchasingCourse();
       setIsLoading(false);
       console.error("Error during enrollment:", error);
-      alert("Failed to enroll. Please try again. Error: " + error.message);
+      toast.error(
+        "Failed to enroll. Please try again. Error: " + error.message
+      );
     }
   };
 
+  // Check enrollment status whenever we come back to this page or enrolled courses change
+  useEffect(() => {
+    if (id) {
+      checkEnrollmentStatus();
+    }
+  }, [id, enrolledCourses, location.pathname]);
+
   useEffect(() => {
     fetchCourseData();
-  }, [allCourses]);
+  }, [allCourses, id]);
 
   const toggleSection = (index) => {
     setOpenSections((prev) => ({ ...prev, [index]: !prev[index] }));
@@ -275,7 +338,6 @@ const CourseDetails = () => {
             <img src={courseData.courseThumbnail} alt="" />
           )}
 
-          <img src={courseData.courseThumbnail} alt="" />
           <div className="p-5">
             <div className="flex items-center gap-2">
               <img

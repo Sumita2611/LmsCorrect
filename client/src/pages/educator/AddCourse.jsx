@@ -1,274 +1,268 @@
-import React, { useContext, useEffect, useRef, useState } from 'react'
-import uniqid from 'uniqid'
-import Quill from 'quill'
-import { assets } from '../../assets/assets';
-import { AppContext } from '../../context/AppContext'
+import React, { useContext, useState, useEffect } from "react";
+import { AppContext } from "../../context/AppContext";
+import { Line } from "rc-progress";
+import Footer from "../../components/student/Footer";
+import { toast } from "react-toastify";
 
+const MyEnrollments = () => {
+  const {
+    enrolledCourses,
+    calculateCourseDuration,
+    navigate,
+    calculateNoOfLectures,
+    getToken,
+    backendUrl,
+  } = useContext(AppContext);
 
-const AddCourse = () => {
+  const [progressArray, setProgressArray] = useState([
+    { lectureCompleted: 2, totalLectures: 4 },
+    { lectureCompleted: 1, totalLectures: 5 },
+    { lectureCompleted: 3, totalLectures: 6 },
+    { lectureCompleted: 4, totalLectures: 4 },
+    { lectureCompleted: 0, totalLectures: 3 },
+    { lectureCompleted: 5, totalLectures: 7 },
+    { lectureCompleted: 6, totalLectures: 8 },
+    { lectureCompleted: 2, totalLectures: 6 },
+    { lectureCompleted: 4, totalLectures: 10 },
+    { lectureCompleted: 3, totalLectures: 5 },
+    { lectureCompleted: 7, totalLectures: 7 },
+    { lectureCompleted: 1, totalLectures: 4 },
+    { lectureCompleted: 0, totalLectures: 2 },
+    { lectureCompleted: 5, totalLectures: 5 },
+  ]);
 
-   const { backendUrl, getToken } = useContext(AppContext)
-   const quillRef = useRef(null);
-   const editorRef = useRef(null);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [courseToRemove, setCourseToRemove] = useState(null);
+  const [removeLoading, setRemoveLoading] = useState(false);
+  const [localCourses, setLocalCourses] = useState([]);
 
-   const [courseTitle, setCourseTitle] = useState('')
-   const [coursePrice, setCoursePrice] = useState(0)
-   const [discount, setDiscount] = useState(0)
-   const [image, setImage] = useState(null)
-   const [chapters, setChapters] = useState([])
-   const [showPopup, setShowPopup] = useState(false)
-   const [currentChapterId, setCurrentChapterId] = useState(null);
-
-   const [lectureDetails, setLectureDetails] = useState(
-    {
-      lectureTitle: '',
-      lectureDuration: '',
-      lectureUrl: '',
-      isPreviewFree: false,
-    }
-   )
-
-   const handleChapter = (action, chapterId) => {
-    if (action === 'add'){
-      const title = prompt('Enter Chapter Name:');
-      if (title) {
-        const newChapter = {
-          chapterId: uniqid(),
-          chapterTitle: title,
-          chapterContent: [],
-          collapsed: false,
-          chapterOrder: chapters.length > 0 ? chapters.slice(-1)[0].chapterOrder + 1 : 1,
-        };
-        setChapters([...chapters, newChapter]);
+  useEffect(() => {
+    // In a real implementation, this would fetch progress data from the API
+    const updatedProgressArray = enrolledCourses.map((course, index) => {
+      if (progressArray[index]) {
+        return progressArray[index];
       }
-    } else if (action === 'remove') {
-      setChapters(chapter.filter((chapter) => chapter.chapterId !== chapterId));
-    } else if(action === 'toggle') {
-      setChapters(
-        chapters.map((chapter) => 
-          chapter.chapterId === chapterId ? {...chapter, collapsed: !chapter.collapsed} : chapter
-        )
-      );
-    }
-   };
 
-   const handleLecture = (action, chapterId, lectureIndex) => {
-    if (action === 'add') {
-      setCurrentChapterId(chapterId);
-      setShowPopup(true);
-    } else if (action === 'remove') {
-      setChapters(
-        chapters.map((chapter) => {
-          if (chapter.chapterId === chapterId) {
-            chapter.chapterContent.splice(lectureIndex, 1);
-          }
-          return chapter;
-        })
-      );
-    }
-   };
-
-   const addLecture = () => {
-    setChapters(
-      chapters.map((chapter) => {
-        if (chapter.chapterId === currentChapterId) {
-          const newLecture = {
-            ...lectureDetails,
-            lectureOrder: chapter.chapterContent.length > 0 ? 
-            chapter.chapterContent.slice(-1)[0].lectureOrder + 1 : 1,
-            lectureId: uniqid()
-          };
-          chapter.chapterContent.push(newLecture);
-        }
-        return chapter;
-      })
-    );
-    setShowPopup(false);
-    setLectureDetails({
-      lectureTitle: '',
-      lectureDuration: '',
-      lectureUrl: '',
-      isPreviewFree: false,
+      const totalLectures = calculateNoOfLectures(course);
+      return {
+        lectureCompleted: 0,
+        totalLectures,
+      };
     });
-   };
 
-   const handleSubmit = async (e) => {
-    try{
-    e.preventDefault()
-    if(!image){
-      toast.error('Thumbnail Not Selected')
-    }
+    setProgressArray(updatedProgressArray);
+    setLocalCourses(enrolledCourses);
+  }, [enrolledCourses]);
 
-    const courseData = {
-      courseTitle,
-      courseDescription: quillRef.current.root.innerHTML,
-      coursePrice: Number(coursePrice),
-      discount: Number(discount),
-      courseContent: chapters,
-    }
+  // Calculate percentage completion
+  const calculatePercentage = (completed, total) => {
+    if (!total) return 0;
+    const percentage = (completed / total) * 100;
+    return Math.round(percentage);
+  };
 
-    const formData = new FormData()
-    formData.append('courseData', JSON.stringify(courseData))
-    formData.append('image', image)
+  // Determine button text based on progress
+  const getButtonText = (completed, total) => {
+    if (completed === 0) return "Start";
+    if (completed === total) return "Completed";
+    return "Resume";
+  };
 
-    const token = await getToken()
-    const {data} = await axios.post(backendUrl + '/api/educator/add-course',formData, { headers: { Authorization: `Bearer ${token}`}})
+  // Handle remove course button click
+  const handleRemoveClick = (course) => {
+    setCourseToRemove(course);
+    setShowRemoveConfirm(true);
+  };
 
-    if (data.success){
-      toast.success(data.message)
-      setCourseTitle('')
-      setCoursePrice(0)
-      setDiscount(0)
-      setImage(null)
-      setChapters([])
-      quillRef.current.root.innerHTML = ""
-    }else{
-      toast.error(data.message)
-    }
-    } catch (error) {
-      toast.error(error.message)
-    }
-   };
+  // Close the confirmation dialog
+  const closeRemoveConfirm = () => {
+    setShowRemoveConfirm(false);
+    setCourseToRemove(null);
+  };
 
-   useEffect(()=> {
-    // Initiate Quill only once
-    if (!quillRef.current && editorRef.current) {
-      quillRef.current = new Quill(editorRef.current, {
-        theme: 'snow',
+  // Confirm and process course removal
+  const confirmRemove = async () => {
+    if (!courseToRemove) return;
+
+    try {
+      setRemoveLoading(true);
+
+      const token = await getToken();
+      if (!token) {
+        toast.error("Authentication error. Please login again.");
+        setRemoveLoading(false);
+        closeRemoveConfirm();
+        return;
+      }
+
+      console.log(`Attempting to unenroll from course: ${courseToRemove._id}`);
+
+      const response = await fetch(`${backendUrl}/api/user/unenroll`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          courseId: courseToRemove._id,
+        }),
       });
-    }
-   }, [])
 
+      const data = await response.json();
+      console.log("Unenroll response:", data);
+
+      if (data.success) {
+        toast.success("Successfully unenrolled from the course");
+
+        // Update local state to remove the course
+        setLocalCourses((prev) =>
+          prev.filter((course) => course._id !== courseToRemove._id)
+        );
+      } else {
+        throw new Error(data.message || "Failed to remove course");
+      }
+    } catch (error) {
+      console.error("Error removing course:", error);
+      toast.error(error.message || "Failed to remove course");
+    } finally {
+      setRemoveLoading(false);
+      closeRemoveConfirm();
+    }
+  };
 
   return (
-    <div className='h-screen overflow-scroll flex flex-col items-start justify-between md:p-8 md:pb-0 p-4 pt-8 pb-0'>
-      <form onSubmit={handleSubmit} className=' flex flex-col gap-4 max-w-md w-full text-gray-500'>
-        <div className='flex flex-col gap-1'>
-          <p>Course Title</p>
-          <input onChange={e => setCourseTitle(e.target.value)} value={courseTitle} type="text" placeholder='Type here' className='outline-none md:py-2.5 py-2 px-3 rounded border border-gray-500' required/>
-        </div>
-        <div className='flex flex-col gap-1'>
-          <p>Course Description</p>
-          <div ref={editorRef}></div>
-        </div>
+    <>
+      <div className="md:px-36 px-8 pt-10">
+        <h1 className="text-2xl font-semibold">My enrollments</h1>
+        <table className="md:table-auto table-fixed w-full overflow-hidden border mt-10">
+          <thead className="text-gray-900 border-b border-gray-500/20 text-sm text-left max-sm:hidden">
+            <tr>
+              <th className="px-4 py-3 font-semibold truncate">Course</th>
+              <th className="px-4 py-3 font-semibold truncate">Duration</th>
+              <th className="px-4 py-3 font-semibold truncate">Completed</th>
+              <th className="px-4 py-3 font-semibold truncate">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="text-gray-700">
+            {localCourses.map((course, index) => {
+              const progress = progressArray[index] || {
+                lectureCompleted: 0,
+                totalLectures: calculateNoOfLectures(course),
+              };
+              const percentage = calculatePercentage(
+                progress.lectureCompleted,
+                progress.totalLectures
+              );
 
-        <div className='flex items-center justify-between flex-wrap'>
-          <div className='flex flex-col gap-1'>
-            <p>Course Price</p>
-            <input onChange={e => setCoursePrice(e.target.value)}
-            value={coursePrice}
-            type="number" placeholder='0' className='outline-none md:py-2.5 py-2 w-28 px-3 rounded border border-gray-500' required />
-          </div>
-
-          <div className='flex md:flex-row flex-col items-center gap-3'>
-            <p>Course Thumbnail</p>
-            <label htmlFor="thumbnailImage" className='flex items-center gap-3'>
-              <img src={assets.file_upload_icon} alt="" 
-              className='p-3 bg-blue-500 rounded'/>
-              <input type="file" id='thumbnailImage' onChange={e => setImage(e.target.files[0])} accept='image/*' hidden />
-              <img className='max-h-10' src={image ? URL.createObjectURL(image) : ''} alt="" />
-            </label>
-          </div>
-        </div>
-
-        <div className='flex flex-col gap-1'>
-          <p>Discount %</p>
-          <input onChange={e => setDiscount(e.target.value)} value={discount} type="number" 
-          placeholder='0' min={0} max={100} className='outline-none md:py-2.5 py-2 w-28 px-3 rounded border border-gray-500' required
-          />
-        </div>
-
-        {/* Adding chapters and lectures */}
-        <div>
-          {chapters.map((chapter, chapterIndex) => (
-            <div key={chapterIndex} className='bg-white border rounded-lg mb-4'>
-              <div className='flex justify-between items-center p-4 border-b'>
-                <div className='flex items-center'>
-                  <img 
-                  onClick={() => handleLecture('toggle', chapter.chapterId)}
-                  src={assets.dropdown_icon} width={14} alt="" className={`mr-2 cursor-pointer transition-all ${chapter.collapsed && "-rotate-90"}`}/>
-                  <span className='font-semibold'>{chapterIndex + 1} {chapter.chapterTitle}</span>
-                </div>
-                <span className='text-gray-500'>{chapter.chapterContent.length} Lectures</span>
-                <img 
-                onClick={() => handleLecture('remove', chapter.chapterId)}
-                src={assets.cross_icon} alt="" className='cursor-pointer'/>
-              </div>
-              {!chapter.collapsed && (
-                <div className='p-4'>
-                  {chapter.chapterContent.map((lecture, lectureIndex)=>(
-                    <div key={lectureIndex} className='flex justify-between items-center mb-2'>
-                        <span>{lectureIndex + 1} {lecture.lectureTitle} - {lecture.lectureDuration} mins - <a href={lecture.lectureUrl} target='blank' className='text-blue-500'>Link</a> - {lecture.isPreviewFree ? 'Free Preview' : 'Paid'}</span>
-                        <img src={assets.cross_icon} alt="" onClick={()=> handleLecture('remove', chapter.chapterId, lectureIndex)} className='cursor-pointer'/>
+              return (
+                <tr key={course._id} className="border-b border-gray-500/20">
+                  <td className="md:px-4 pl-2 md:pl-4 py-3 flex items-center space-x-3">
+                    <img
+                      src={course.courseThumbnail}
+                      alt=""
+                      className="w-14 sm:w-24 md:w-28"
+                    />
+                    <div className="flex-1">
+                      <p className="mb-1 max-sm:text-sm">
+                        {course.courseTitle}
+                      </p>
+                      <div className="flex items-center">
+                        <Line
+                          strokeWidth={2}
+                          percent={percentage}
+                          className="bg-gray-300 rounded-full"
+                          strokeColor={
+                            percentage === 100 ? "#10B981" : "#3B82F6"
+                          }
+                        />
+                        <span className="ml-2 text-sm font-medium">
+                          {percentage}%
+                        </span>
                       </div>
-                  ))}
-                  <div className='inline-flex bg-gray-100 p-2 rounded cursor-pointer mt-2' onClick={() => handleLecture('add', chapter.chapterId)}>+ Add Lecture
-                  </div>
-                  </div>
-              )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 max-sm:hidden">
+                    {calculateCourseDuration(course)}
+                  </td>
+                  <td className="px-4 py-3 max-sm:hidden">
+                    {progress &&
+                      `${progress.lectureCompleted} / ${progress.totalLectures}`}{" "}
+                    <span>Lectures</span>
+                  </td>
+                  <td className="px-4 py-3 max-sm:text-right">
+                    <div className="flex items-center space-x-2 justify-end">
+                      <button
+                        className={`px-3 sm:px-5 py-1.5 sm:py-2 max-sm:text-xs text-white ${
+                          percentage === 100 ? "bg-green-500" : "bg-blue-600"
+                        }`}
+                        onClick={() => navigate("/player/" + course._id)}
+                      >
+                        {getButtonText(
+                          progress.lectureCompleted,
+                          progress.totalLectures
+                        )}
+                      </button>
+                      <button
+                        className="px-3 sm:px-5 py-1.5 sm:py-2 bg-red-500 max-sm:text-xs text-white"
+                        onClick={() => handleRemoveClick(course)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {localCourses.length === 0 && (
+          <div className="text-center py-10">
+            <p className="text-gray-500 mb-4">
+              You haven't enrolled in any courses yet.
+            </p>
+            <button
+              className="px-5 py-2 bg-blue-600 text-white rounded"
+              onClick={() => navigate("/course-list")}
+            >
+              Browse Courses
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Remove Confirmation Modal */}
+      {showRemoveConfirm && courseToRemove && (
+        <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-medium mb-4">Remove Course</h3>
+            <p className="mb-6">
+              Are you sure you want to remove "{courseToRemove.courseTitle}"
+              from your enrollments?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={closeRemoveConfirm}
+                className="px-4 py-2 border border-gray-300 rounded text-gray-700"
+                disabled={removeLoading}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemove}
+                className="px-4 py-2 bg-red-600 text-white rounded"
+                disabled={removeLoading}
+              >
+                {removeLoading ? "Removing..." : "Remove"}
+              </button>
             </div>
-          ))}
-          <div className='flex justify-center items-center bg-blue-100 p-2 rounded-lg cursor-pointer' onClick={() => handleChapter('add')} >+ Add Chapter</div>
-
-          {showPopup && (
-            <div className='fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50'>
-              <div className='bg-white text-gray-700 p-4 rounded relative w-full max-w-80'>
-                <h2 className='text-lg font-semibold mb-4'>Add Lecture</h2>
-
-                <div className='mb-2'>
-                  <p>Lecture Title</p>
-                  <input 
-                  type="text"
-                  className='mt-1 block w-full border rounded py-1 px-2'
-                  value={lectureDetails.lectureTitle}
-                  onChange={(e) => setLectureDetails({...lectureDetails,lectureTitle: e.target.value})}
-                   />
-                  </div>
-
-                  <div className='mb-2'>
-                  <p>Duration (minutes)</p>
-                  <input 
-                  type="number"
-                  className='mt-1 block w-full border rounded py-1 px-2'
-                  value={lectureDetails.lectureTitle}
-                  onChange={(e) => setLectureDetails({...lectureDetails,lectureTitle: e.target.value})}
-                   />
-                  </div>
-
-                  <div className='mb-2'>
-                  <p>Lecture URL</p>
-                  <input 
-                  type="text"
-                  className='mt-1 block w-full border rounded py-1 px-2'
-                  value={lectureDetails.lectureUrl}
-                  onChange={(e) => setLectureDetails({...lectureDetails,lectureUrl: e.target.value})}
-                   />
-                  </div>
-
-                  <div className='flex gap-2 my-4'>
-                    <p>Is Preview Free?</p>
-                    <input 
-                    type="checkbox"
-                    className='mt-1 scale-125'
-                    checked={lectureDetails.isPreviewFree}
-                    onChange={(e) => setLectureDetails({ ...lectureDetails, isPreviewFree: e.target.checked })}
-                     />
-                  </div>
-
-                  <button type='button' className='w-full bg-blue-400 text-white px-4 py-2 rounded' onClick={addLecture}>Add</button>
-
-                  <img onClick={() => setShowPopup(false)} src={assets.cross_icon} className='absolute top-4 right-4 w-4 cursor-pointer' alt="" />
-              </div>
-            </div>
-          )
-          }
+          </div>
         </div>
-        <button type='submit' className='bg-black text-white w-max py-2.5 px-8 rounded my-4'>
-          ADD
-        </button>
-      </form>
-    </div>
-  )
-}
+      )}
 
-export default AddCourse
+      <Footer />
+    </>
+  );
+};
+
+export default MyEnrollments;
