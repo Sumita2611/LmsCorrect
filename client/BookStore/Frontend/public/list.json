@@ -1,0 +1,162 @@
+[
+  {
+    "id": 1,
+    "name": "The Silent Patient",
+    "description": "A psychological thriller about a woman who stops speaking after a mysterious crime.",
+    "price": 0,
+    "category": "Free",
+    "img": "https://m.media-amazon.com/images/I/81p+gNQOHXL._AC_UY218_.jpg"
+  },
+  {
+    "id": 2,
+    "name": "Atomic Habits",
+    "description": "A guide to building good habits and breaking bad ones for personal improvement.",
+    "price": 0,
+    "category": "Free",
+    "img": "https://m.media-amazon.com/images/I/81yK2zF9q7L._AC_UY218_.jpg"
+  },
+  {
+    "id": 3,
+    "name": "Where the Crawdads Sing",
+    "description": "A haunting mystery about an isolated young woman in the wilds of North Carolina.",
+    "price": 0,
+    "category": "Free",
+    "img": "https://m.media-amazon.com/images/I/91p0Z43K-PL._AC_UY218_.jpg"
+  },
+  {
+    "id": 4,
+    "name": "Sapiens",
+    "description": "A deep dive into the history and evolution of humankind from prehistoric times.",
+    "price": 0,
+    "category": "Free",
+    "img": "https://m.media-amazon.com/images/I/81nIkF9NYyL._AC_UY218_.jpg"
+  },
+  {
+    "id": 5,
+    "name": "The Midnight Library",
+    "description": "A novel about choices and second chances in a magical library of alternate lives.",
+    "price": 0,
+    "category": "Free",
+    "img": "https://m.media-amazon.com/images/I/91i6txuJc1L._AC_UY218_.jpg"
+  },
+  {
+    "id": 6,
+    "name": "Educated",
+    "description": "A memoir of a woman who grows up in a strict, isolated household and her journey to education.",
+    "price": 0,
+    "category": "Free",
+    "img": "https://m.media-amazon.com/images/I/81WojzN8VvL._AC_UY218_.jpg"
+  },
+  {
+    "id": 7,
+    "name": "Becoming",
+    "description": "Michelle Obama’s powerful, inspiring memoir about her life and experiences.",
+    "price": 18,
+    "category": "Biography",
+    "img": "https://m.media-amazon.com/images/I/81GZPj8t9DL._AC_UY218_.jpg"
+  },
+  {
+    "id": 8,
+    "name": "The Alchemist",
+    "description": "A philosophical novel about a shepherd’s quest to follow his dreams and discover personal legend.",
+    "price": 10,
+    "category": "Fiction",
+    "img": "https://m.media-amazon.com/images/I/81y6LqS-9vL._AC_UY218_.jpg"
+  },
+  {
+    "id": 9,
+    "name": "The Subtle Art of Not Giving a F*ck",
+    "description": "A counterintuitive guide to living a good life by caring about what truly matters.",
+    "price": 15,
+    "category": "Self-help",
+    "img": "https://m.media-amazon.com/images/I/71p-48U2DuL._AC_UY218_.jpg"
+  },
+  {
+    "id": 10,
+    "name": "Dune",
+    "description": "A sci-fi epic set on a desert planet with political intrigue and intergalactic struggles.",
+    "price": 12,
+    "category": "Science Fiction",
+    "img": "https://m.media-amazon.com/images/I/81E6TUsNduL._AC_UY218_.jpg"
+  },
+  {
+    "id": 11,
+    "name": "1984",
+    "description": "A dystopian novel about a future where the government controls everything and everyone.",
+    "price": 9,
+    "category": "Fiction",
+    "img": "https://m.media-amazon.com/images/I/81Z2KZOMR6L._AC_UY218_.jpg"
+  },
+  {
+    "id": 12,
+    "name": "The Catcher in the Rye",
+    "description": "A story of teenage angst and rebellion, following Holden Caulfield’s journey in New York City.",
+    "price": 11,
+    "category": "Classics",
+    "img": "https://m.media-amazon.com/images/I/71zPHMvOSPL._AC_UY218_.jpg"
+  },
+  {
+    "id": 13,
+    "name": "The Power of Now",
+    "description": "A guide to spiritual enlightenment and living in the present moment.",
+    "price": 14,
+    "category": "Spirituality",
+    "img": "https://m.media-amazon.com/images/I/81fZOh+kA5L._AC_UY218_.jpg"
+  },
+  {
+    "id": 14,
+    "name": "The Hunger Games",
+    "description": "A dystopian adventure where young people must compete in a televised battle to the death.",
+    "price": 13,
+    "category": "Young Adult",
+    "img": "https://m.media-amazon.com/images/I/81NLRF5oxOL._AC_UY218_.jpg"
+  },
+  {
+    "id": 15,
+    "name": "To Kill a Mockingbird",
+    "description": "A classic novel about race, injustice, and morality in the American South.",
+    "price": 10,
+    "category": "Classics",
+    "img": "https://m.media-amazon.com/images/I/81OYPDUB7wL._AC_UY218_.jpg"
+  },
+  {
+    "id": 16,
+    "name": "Harry Potter and the Sorcerer's Stone",
+    "description": "The magical journey of a boy discovering his wizarding heritage and destiny.",
+    "price": 12,
+    "category": "Fantasy",
+    "img": "https://m.media-amazon.com/images/I/81YOwFPMgfL._AC_UY218_.jpg"
+  },
+  {
+    "id": 17,
+    "name": "The Great Gatsby",
+    "description": "A tragic tale of love, wealth, and the American Dream set in the Jazz Age.",
+    "price": 8,
+    "category": "Classics",
+    "img": "https://m.media-amazon.com/images/I/81xIPnH4KbL._AC_UY218_.jpg"
+  },
+  {
+    "id": 18,
+    "name": "The Book Thief",
+    "description": "A novel about a young girl in Nazi Germany who steals books to escape reality.",
+    "price": 13,
+    "category": "Historical Fiction",
+    "img": "https://m.media-amazon.com/images/I/91Lzsy7U+dL._AC_UY218_.jpg"
+  },
+  {
+    "id": 19,
+    "name": "Brave New World",
+    "description": "A dystopian world where technology, control, and pleasure reign supreme.",
+    "price": 10,
+    "category": "Science Fiction",
+    "img": "https://m.media-amazon.com/images/I/71XU9AozZpL._AC_UY218_.jpg"
+  },
+  {
+    "id": 20,
+    "name": "The Road",
+    "description": "A post-apocalyptic journey of survival for a father and son.",
+    "price": 14,
+    "category": "Dystopian Fiction",
+    "img": "https://m.media-amazon.com/images/I/91tG3oflA4L._AC_UY218_.jpg"
+  }
+]

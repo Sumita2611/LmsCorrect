@@ -91,33 +91,162 @@ export const AppContextProvider = (props) => {
   //Fetch all courses
   const fetchAllCourses = async () => {
     try {
-      console.log("Fetching all courses from API");
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/courses`
-      );
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data = await response.json();
       console.log(
-        `Fetched ${data.courses ? data.courses.length : 0} courses from API`
+        "Fetching all courses from API:",
+        import.meta.env.VITE_API_URL
       );
 
-      if (data.success && data.courses && data.courses.length > 0) {
-        setAllCourses(data.courses);
-      } else {
-        console.warn("No courses found or API returned empty data");
-        // Fallback to dummy data if API fails
-        setAllCourses(dummyCourses);
+      try {
+        console.log("Making fetch request to /api/courses");
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/courses`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: "omit",
+            mode: "cors",
+            cache: "no-cache",
+          }
+        );
+
+        if (!response.ok) {
+          console.error(
+            `API error: ${response.status} - ${response.statusText}`
+          );
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        // Try to parse response as JSON
+        let data;
+        try {
+          const responseText = await response.text();
+          console.log(
+            "Raw API response:",
+            responseText.substring(0, 200) + "..."
+          );
+
+          // Check if the response is HTML instead of JSON
+          if (
+            responseText.includes("<!DOCTYPE html>") ||
+            responseText.includes("<html>")
+          ) {
+            console.error("Received HTML response instead of JSON");
+            throw new Error("Invalid JSON response");
+          }
+
+          // Try to parse as JSON
+          data = JSON.parse(responseText);
+          console.log("API response data:", data);
+
+          if (data.success && Array.isArray(data.courses)) {
+            console.log(`Fetched ${data.courses.length} courses from API`);
+            console.log("Source:", data.source || "unknown");
+
+            // Log the first course to check structure
+            if (data.courses.length > 0) {
+              console.log("Sample course data:", data.courses[0]);
+            }
+
+            // Even if the array is empty, still set it
+            setAllCourses(data.courses);
+            console.log("Updated allCourses state with new data");
+            return;
+          } else {
+            console.error("API response doesn't have expected format:", data);
+            throw new Error("Invalid response format");
+          }
+        } catch (parseError) {
+          console.error("Failed to parse response as JSON:", parseError);
+          throw parseError;
+        }
+      } catch (apiError) {
+        console.error("API call failed:", apiError);
+
+        // Try with simplified approach - no headers
+        try {
+          console.log("Trying simplified fetch approach without headers...");
+          const response = await fetch(
+            `${import.meta.env.VITE_API_URL}/api/courses`,
+            {
+              method: "GET",
+              mode: "cors",
+              credentials: "omit",
+              cache: "no-cache",
+            }
+          );
+
+          if (!response.ok) {
+            console.error(
+              `Simplified fetch failed with status ${response.status}`
+            );
+            throw new Error(`API error: ${response.status}`);
+          }
+
+          // Try to get response as text first
+          const responseText = await response.text();
+          console.log(
+            "Raw simplified response:",
+            responseText.substring(0, 200) + "..."
+          );
+
+          // Parse text to JSON manually
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseError) {
+            console.error(
+              "Failed to parse simplified response as JSON:",
+              parseError
+            );
+            throw parseError;
+          }
+
+          console.log("Simplified API response data:", data);
+
+          if (data.success && Array.isArray(data.courses)) {
+            setAllCourses(data.courses);
+            console.log(
+              "Successfully fetched courses with simplified approach"
+            );
+            return;
+          } else {
+            console.warn(
+              "Simplified API returned invalid or empty response:",
+              data
+            );
+            // Don't throw error for empty array
+            setAllCourses([]);
+            return;
+          }
+        } catch (simplifiedError) {
+          console.error("Simplified fetch failed:", simplifiedError);
+          console.error("CRITICAL: Failed to fetch courses from API");
+          setAllCourses([]);
+          return;
+        }
       }
     } catch (error) {
       console.error("Error fetching courses:", error);
-      // Fallback to dummy data if API fails
-      setAllCourses(dummyCourses);
+      // Don't set dummy data, set empty array
+      setAllCourses([]);
     }
   };
+
+  // Add a useEffect to auto-refresh courses data
+  useEffect(() => {
+    // Initial fetch of all courses
+    fetchAllCourses();
+
+    // Set up interval to refresh courses more frequently
+    const refreshInterval = setInterval(() => {
+      fetchAllCourses();
+    }, 10000); // Refresh every 10 seconds for real-time updates
+
+    // Clean up interval on component unmount
+    return () => clearInterval(refreshInterval);
+  }, []);
 
   //Function to calculate average rating of course
   const calculateRating = (course) => {
@@ -175,26 +304,74 @@ export const AppContextProvider = (props) => {
         return;
       }
 
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/user/data`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-          cache: "no-store",
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/user/data`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            credentials: "omit",
+            mode: "cors",
+            cache: "no-cache",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `API error: ${response.status} - ${response.statusText}`
+          );
         }
-      );
 
-      const data = await response.json();
-      console.log("User data response:", data);
+        const data = await response.json();
+        console.log("User data response:", data);
 
-      if (data.success) {
-        setUserData(data.user);
-      } else {
-        console.error("Failed to fetch user data:", data.message);
+        if (data.success) {
+          setUserData(data.user);
+          console.log("Successfully loaded user data from database");
+        } else {
+          console.error("Failed to fetch user data:", data.message);
+          throw new Error(data.message || "Failed to fetch user data");
+        }
+      } catch (apiError) {
+        console.error("API call failed:", apiError);
+
+        // Try with token as query param
+        try {
+          console.log("Trying simplified fetch approach with token param...");
+
+          const tokenParam = encodeURIComponent(token);
+          const response = await fetch(
+            `${import.meta.env.VITE_API_URL}/api/user/data?token=${tokenParam}`,
+            {
+              method: "GET",
+              mode: "cors",
+              credentials: "omit",
+              cache: "no-cache",
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          if (data.success) {
+            setUserData(data.user);
+            console.log(
+              "Successfully loaded user data with simplified approach"
+            );
+          } else {
+            throw new Error(data.message || "Failed to fetch user data");
+          }
+        } catch (simplifiedError) {
+          console.error("Simplified fetch failed:", simplifiedError);
+          // Fall back to existing user data if available
+          console.warn("Using cached user data");
+        }
       }
     } catch (error) {
       console.error("Error fetching user data:", error);
@@ -228,10 +405,6 @@ export const AppContextProvider = (props) => {
       console.error("Error loading enrolled courses from localStorage:", error);
     }
   }, [allCourses]);
-
-  useEffect(() => {
-    fetchAllCourses();
-  }, []);
 
   useEffect(() => {
     if (user) {

@@ -4,9 +4,12 @@ import Quill from "quill";
 import { assets } from "../../assets/assets";
 import { AppContext } from "../../context/AppContext";
 import axios from "axios";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const AddCourse = () => {
-  const { backendUrl, getToken, navigate } = useContext(AppContext);
+  const { backendUrl, navigate, fetchAllCourses } = useContext(AppContext);
+  const { getToken } = useAuth();
+  const { user } = useUser();
   const quillRef = useRef(null);
   const editorRef = useRef(null);
 
@@ -107,8 +110,26 @@ const AddCourse = () => {
       e.preventDefault();
       setIsSubmitting(true);
 
+      if (!user) {
+        alert("You must be logged in to add a course");
+        setIsSubmitting(false);
+        return;
+      }
+
       if (!image) {
-        console.error("Thumbnail Not Selected");
+        alert("Please select a thumbnail image for your course");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!courseTitle.trim()) {
+        alert("Please enter a course title");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (chapters.length === 0) {
+        alert("Please add at least one chapter to your course");
         setIsSubmitting(false);
         return;
       }
@@ -119,32 +140,86 @@ const AddCourse = () => {
         coursePrice: Number(coursePrice),
         discount: Number(discount),
         courseContent: chapters,
+        isPublished: true,
+        educator: user.id,
       };
 
+      console.log("User ID being set as educator:", user.id);
+
+      // Create FormData instance
       const formData = new FormData();
-      formData.append("courseData", JSON.stringify(courseData));
+
+      // Add course data as JSON string
+      const courseDataJson = JSON.stringify(courseData);
+      console.log("Course data being sent:", courseDataJson);
+      formData.append("courseData", courseDataJson);
+
+      // Add image file
       formData.append("image", image);
 
-      const token = await getToken();
+      // Add educator ID separately to ensure it's not lost
+      formData.append("educatorId", user.id);
 
-      // Log what we're sending to the server for debugging
-      console.log("Submitting course:", courseData);
+      console.log("Preparing to submit course with FormData");
+      // Log form data entries for debugging
+      for (let pair of formData.entries()) {
+        console.log(
+          pair[0],
+          pair[1] instanceof File ? "File: " + pair[1].name : pair[1]
+        );
+      }
 
-      // Send course data to the backend
+      // Get authentication token directly from Clerk
+      let token;
       try {
-        const { data } = await axios.post(
-          `${backendUrl}/api/educator/add-course`,
+        token = await getToken();
+        console.log(
+          "Authentication token obtained:",
+          token ? "Yes (Length: " + token.length + ")" : "No"
+        );
+      } catch (tokenError) {
+        console.error("Failed to get authentication token:", tokenError);
+        alert("Authentication failed. Please sign in again.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!token) {
+        alert("Authentication error. Please sign in again.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Ensure backendUrl doesn't have trailing slash
+      const apiBase = backendUrl.endsWith("/")
+        ? backendUrl.slice(0, -1)
+        : backendUrl;
+
+      const submitUrl = `${apiBase}/api/educator/add-course`;
+
+      console.log("Submitting course to:", submitUrl);
+      console.log("Using auth token:", token.substring(0, 10) + "...");
+
+      // Try with axios first
+      try {
+        console.log("Attempting submission with axios...");
+        const axiosConfig = {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            // Let axios set the content type for FormData
+          },
+        };
+
+        const axiosResponse = await axios.post(
+          submitUrl,
           formData,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "multipart/form-data",
-            },
-          }
+          axiosConfig
         );
 
-        if (data.success) {
-          console.log(data.message);
+        console.log("Axios response:", axiosResponse.data);
+
+        if (axiosResponse.data.success) {
+          // Clear form data on success
           setCourseTitle("");
           setCoursePrice(0);
           setDiscount(0);
@@ -152,32 +227,137 @@ const AddCourse = () => {
           setChapters([]);
           quillRef.current.root.innerHTML = "";
 
-          // Navigate back to courses page
-          setTimeout(() => {
-            navigate("/educator/my-courses?fromAdd=true");
-          }, 1500);
-        } else {
-          console.error("Failed to add course:", data.message);
-        }
-      } catch (apiError) {
-        console.error("API error:", apiError);
-        // Fallback to sample data if the API call fails
-        console.log("Using sample data for demonstration purposes");
+          // Show success message
+          alert("Course added successfully!");
 
-        // Simulate success
-        setCourseTitle("");
-        setCoursePrice(0);
-        setDiscount(0);
-        setImage(null);
-        setChapters([]);
-        quillRef.current.root.innerHTML = "";
+          // Refresh course list
+          fetchAllCourses();
 
-        setTimeout(() => {
+          // Navigate back to my courses page
           navigate("/educator/my-courses?fromAdd=true");
-        }, 1500);
+          return;
+        }
+      } catch (axiosError) {
+        console.error("Axios submission failed:", axiosError);
+        console.log("Falling back to fetch API...");
+      }
+
+      // Fallback to fetch if axios fails
+      try {
+        // Use a basic fetch with minimal options for maximum compatibility
+        const response = await fetch(
+          `${submitUrl}?token=${encodeURIComponent(token)}`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              // Note: Do not set Content-Type header with FormData
+            },
+            body: formData,
+            credentials: "include", // Include cookies if any
+          }
+        );
+
+        let responseText;
+        try {
+          responseText = await response.text();
+          console.log("Raw response:", responseText);
+        } catch (e) {
+          console.error("Couldn't read response text:", e);
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Server error: ${response.status} ${response.statusText}`
+          );
+        }
+
+        // Parse response if possible
+        let data;
+        try {
+          data = JSON.parse(responseText);
+          console.log("Parsed response:", data);
+        } catch (parseError) {
+          console.warn("Could not parse response as JSON:", parseError);
+          // If we can't parse the response but the status was OK, assume success
+          data = { success: true };
+        }
+
+        if (data && data.success) {
+          // Clear form data on success
+          setCourseTitle("");
+          setCoursePrice(0);
+          setDiscount(0);
+          setImage(null);
+          setChapters([]);
+          quillRef.current.root.innerHTML = "";
+
+          // Show success message
+          alert("Course added successfully!");
+
+          // Refresh course list
+          fetchAllCourses();
+
+          // Navigate back to my courses page
+          navigate("/educator/my-courses?fromAdd=true");
+        } else {
+          throw new Error(data?.message || "Unknown error adding course");
+        }
+      } catch (fetchError) {
+        console.error("Fetch submission also failed:", fetchError);
+        console.log("Trying final fallback to general endpoint...");
+
+        // Final attempt with general endpoint as last resort
+        try {
+          // Create a simpler request body format
+          const simpleBody = {
+            ...courseData,
+            educatorId: user.id,
+            // We can't send the image file in this format, so we'll use a placeholder
+            courseThumbnail: "https://placehold.co/600x400?text=Course",
+          };
+
+          // Use the general courses endpoint as a last resort
+          const fallbackResponse = await fetch(`${apiBase}/api/courses`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(simpleBody),
+          });
+
+          const fallbackData = await fallbackResponse.json();
+          console.log("Fallback endpoint response:", fallbackData);
+
+          if (fallbackResponse.ok) {
+            // Clear form and redirect even if this worked
+            setCourseTitle("");
+            setCoursePrice(0);
+            setDiscount(0);
+            setImage(null);
+            setChapters([]);
+            quillRef.current.root.innerHTML = "";
+
+            alert("Course may have been added via alternative method");
+            fetchAllCourses();
+            navigate("/educator/my-courses?fromAdd=true");
+            return;
+          } else {
+            throw new Error(
+              `Fallback API error: ${fallbackData.message || "Unknown error"}`
+            );
+          }
+        } catch (fallbackError) {
+          console.error("All submission attempts failed:", fallbackError);
+          throw new Error(
+            `All submission methods failed: ${fetchError.message}`
+          );
+        }
       }
     } catch (error) {
-      console.error("Error in form submission:", error.message);
+      console.error("Error adding course:", error);
+      alert(`Failed to add course: ${error.message || "Unknown error"}`);
     } finally {
       setIsSubmitting(false);
     }

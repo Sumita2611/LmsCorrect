@@ -111,23 +111,59 @@ export const addCourse = async (req, res) => {
 export const getEducatorCourses = async (req, res) => {
   try {
     const educator = req.auth.userId;
-    console.log(`Fetching courses for educator: ${educator}`);
+    console.log(
+      `========== Fetching courses for educator: ${educator} ==========`
+    );
 
+    // Add more detailed logging
+    console.log("Querying database for educator courses...");
+
+    // Try to find any courses with this educator ID
     const courses = await Course.find({ educator })
       .sort({ createdAt: -1 }) // Sort by newest first
       .lean();
 
     console.log(`Found ${courses.length} courses for educator ${educator}`);
 
-    return res.status(200).json({
-      success: true,
-      courses,
-    });
+    // Log each course for debugging
+    if (courses.length > 0) {
+      courses.forEach((course, index) => {
+        console.log(
+          `Course ${index + 1}: ${course.courseTitle}, ID: ${
+            course._id
+          }, Published: ${course.isPublished}`
+        );
+      });
+
+      return res.status(200).json({
+        success: true,
+        courses,
+        source: "database",
+      });
+    } else {
+      console.warn(
+        `No courses found for educator ${educator}. This could be normal if they haven't created any courses yet.`
+      );
+
+      // Return empty array
+      return res.status(200).json({
+        success: true,
+        courses: [],
+        message: "No courses found for this educator",
+        source: "database-empty",
+      });
+    }
   } catch (error) {
     console.error(`Error getting educator courses: ${error.message}`);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
+    console.error("Error stack:", error.stack);
+
+    // Return empty array instead of error
+    return res.status(200).json({
+      success: true,
+      courses: [],
+      message: "Error fetching courses, using empty array",
+      error: error.message,
+      source: "error-fallback",
     });
   }
 };

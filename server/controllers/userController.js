@@ -3,11 +3,39 @@ import User from "../models/User.js";
 import { Purchase } from "../models/Purchase.js";
 
 import Stripe from "stripe";
+import { clerkClient } from "@clerk/clerk-sdk-node";
 
 //Get user data
 export const getUserData = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // Check if we have a userId from clerk auth
+    let userId = req.auth?.userId;
+
+    // If not, try to get from query parameters
+    if (!userId && req.query.token) {
+      try {
+        // Verify the token and extract user ID
+        const token = req.query.token;
+        const verifiedToken = await clerkClient.verifyToken(token);
+        userId = verifiedToken.sub;
+        console.log("Using userId from query token:", userId);
+      } catch (tokenError) {
+        console.error("Token verification failed:", tokenError);
+        return res.status(401).json({
+          success: false,
+          message: "Invalid authorization token",
+        });
+      }
+    }
+
+    // If we still don't have a userId, return unauthorized
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
     console.log("Fetching data for user:", userId);
 
     // Create user if it doesn't exist yet (useful for development)
@@ -40,7 +68,34 @@ export const getUserData = async (req, res) => {
 //User Enrolled Course with lecture Links
 export const userEnrolledCourses = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // Check if we have a userId from clerk auth
+    let userId = req.auth?.userId;
+
+    // If not, try to get from query parameters
+    if (!userId && req.query.token) {
+      try {
+        // Verify the token and extract user ID
+        const token = req.query.token;
+        const verifiedToken = await clerkClient.verifyToken(token);
+        userId = verifiedToken.sub;
+        console.log("Using userId from query token:", userId);
+      } catch (tokenError) {
+        console.error("Token verification failed:", tokenError);
+        return res.status(401).json({
+          success: false,
+          message: "Invalid authorization token",
+        });
+      }
+    }
+
+    // If we still don't have a userId, return unauthorized
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
     console.log(`Fetching enrolled courses for user: ${userId}`);
 
     const userData = await User.findById(userId);
