@@ -1,21 +1,22 @@
 import React from "react";
 import { assets, dummyEducatorData } from "../../assets/assets";
 import { UserButton, useUser } from "@clerk/clerk-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 const Navbar = () => {
   const educatorData = dummyEducatorData;
   const { user } = useUser();
+  const navigate = useNavigate();
 
   const handleLogoClick = (e) => {
     e.preventDefault();
-    // Force navigation to home page
-    window.location.href = "/";
+    // Navigate to educator dashboard instead of home page
+    navigate("/educator");
   };
 
   return (
     <div className="flex items-center justify-between px-4 md:px-8 border-b border-gray-500 py-3">
-      <a href="/" onClick={handleLogoClick}>
+      <a href="#" onClick={handleLogoClick}>
         <img src={assets.logo} alt="Logo" className="w-28 lg:w-32" />
       </a>
       <div className="flex items-center gap-5 text-gray-500 relative">

@@ -1,12 +1,13 @@
 import React, { useContext, useEffect, useState } from "react";
 import { AppContext } from "../../context/AppContext";
-import Loading from "../../components/student/Loading";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { assets } from "../../assets/assets";
 import { toast } from "react-toastify";
 import { Link } from "react-router-dom";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import useApi from "../../utils/api";
+import LoadingSpinner from "../../components/common/LoadingSpinner";
 
 const MyCourses = () => {
   const { currency, getToken, backendUrl, navigate } = useContext(AppContext);
@@ -148,29 +149,30 @@ const MyCourses = () => {
 
     try {
       setDeleteLoading(true);
-      const token = await getToken();
+      console.log(`Starting deletion of course: ${courseToDelete._id}`);
+      
+      try {
+        console.log(`Sending delete request for course: ${courseToDelete._id}`);
+        const response = await authFetch(`/api/educator/courses/${courseToDelete._id}`, {
+          method: 'DELETE'
+        });
+        console.log('Delete API response:', response);
 
-      if (!token) {
-        throw new Error("Authentication error. Please login again.");
-      }
-
-      const response = await axios.delete(
-        `${backendUrl}/api/educator/courses/${courseToDelete._id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        if (response && response.success) {
+          console.log(`Successfully deleted course: ${courseToDelete._id}`);
+          toast.success("Course deleted successfully");
+          // Remove the deleted course from state
+          setCourses((prevCourses) =>
+            prevCourses.filter((course) => course._id !== courseToDelete._id)
+          );
+        } else {
+          console.error('Delete API returned error:', response);
+          throw new Error((response && response.message) || "Failed to delete course");
         }
-      );
-
-      if (response.data.success) {
-        toast.success("Course deleted successfully");
-        // Remove the deleted course from state
-        setCourses((prevCourses) =>
-          prevCourses.filter((course) => course._id !== courseToDelete._id)
-        );
-      } else {
-        throw new Error(response.data.message || "Failed to delete course");
+      } catch (apiError) {
+        console.error("API error during deletion:", apiError);
+        toast.error(apiError.message || "Failed to connect to server");
+        throw apiError;
       }
     } catch (error) {
       console.error("Error deleting course:", error);
@@ -183,15 +185,24 @@ const MyCourses = () => {
 
   useEffect(() => {
     console.log("MyCourses component mounted");
+    console.log("Authentication state:", {
+      isLoaded,
+      isSignedIn,
+      userId: user?.id,
+    });
 
-    // Check authentication first
+    // Only redirect if authentication has loaded AND user is not signed in
     if (isLoaded && !isSignedIn) {
+      console.warn("User not authenticated, redirecting to sign-in");
       navigate("/sign-in");
       return;
     }
 
-    // Fetch educator courses from the API
-    fetchEducatorCourses();
+    // Only fetch courses if the user is signed in or auth state isn't loaded yet
+    if (!isLoaded || isSignedIn) {
+      console.log("Fetching educator courses...");
+      fetchEducatorCourses();
+    }
 
     // Try to reload all courses when navigating from addCourse
     const urlParams = new URLSearchParams(window.location.search);
@@ -203,9 +214,9 @@ const MyCourses = () => {
         fetchEducatorCourses();
       }, 1000);
     }
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, user?.id]);
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingSpinner message="Loading your courses..." />;
 
   return (
     <div className="min-h-[calc(100vh-180px)] flex flex-col pb-20 md:p-8 md:pb-20 p-4 pt-8">

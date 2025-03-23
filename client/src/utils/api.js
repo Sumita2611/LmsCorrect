@@ -109,12 +109,65 @@ export const useApi = () => {
       try {
         token = await getToken();
         console.log("Retrieved auth token:", token ? "✓" : "✗");
+        if (token) {
+          console.log("Token first 10 chars:", token.substring(0, 10) + "...");
+        }
       } catch (tokenError) {
         console.warn("Failed to get auth token:", tokenError);
         // Continue without token - the server may return mock data
       }
 
-      // Continue with the request even if token retrieval failed
+      // Special handling for DELETE requests
+      if (options.method === 'DELETE') {
+        console.log(`[API] DELETE request for ${endpoint}`);
+        const url = `${API_URL}${endpoint}`;
+        
+        // Prepare headers with token
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+          console.log("[API] Using Authorization header with token");
+          
+          // Also add as query param as backup
+          const tokenParam = encodeURIComponent(token);
+          const urlWithToken = url.includes('?') 
+            ? `${url}&token=${tokenParam}` 
+            : `${url}?token=${tokenParam}`;
+          
+          console.log(`[API] Sending DELETE request to ${urlWithToken.substring(0, 100)}...`);
+          
+          const response = await fetch(urlWithToken, {
+            method: 'DELETE',
+            headers,
+            mode: 'cors',
+            credentials: 'omit',
+            cache: 'no-cache'
+          });
+          
+          // Log complete response for debugging
+          console.log(`[API] DELETE response status:`, response.status, response.statusText);
+          console.log(`[API] DELETE response headers:`, Object.fromEntries([...response.headers.entries()]));
+          
+          if (!response.ok) {
+            console.error(`[API] DELETE error: ${response.status} - ${response.statusText}`);
+            const errorText = await response.text();
+            console.error(`[API] DELETE error response:`, errorText);
+            throw new Error(`API error: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          console.log(`[API] DELETE success response:`, data);
+          return data;
+        } else {
+          console.error("[API] No token available for DELETE request!");
+          throw new Error("Authentication required");
+        }
+      }
+
+      // Continue with the regular request for other methods
       return fetchWithCors(endpoint, { ...options, token });
     } catch (error) {
       console.error("Auth fetch error:", error);

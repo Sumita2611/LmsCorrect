@@ -11,6 +11,12 @@ const Loading = () => {
   useEffect(() => {
     console.log(`Loading component mounted. Redirecting to ${path || "home"}`);
 
+    // Check for special case of educator route
+    if (path === "educator" || path?.startsWith("educator/")) {
+      console.log("This is an educator route, no need for redirect");
+      return; // Exit early to prevent default redirect
+    }
+
     // If we're redirecting to my-enrollments, we should keep the purchasing state
     // to allow the MyEnrollments component to verify enrollment
     const isEnrollmentRedirect = path === "my-enrollments";
